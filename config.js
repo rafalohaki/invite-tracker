@@ -43,7 +43,7 @@ module.exports = {
     // Example:
     // logging: {
     //     level: 'info', // e.g., 'debug', 'info', 'warn', 'error'
-    //     filePath: '/var/log/dcinvitetracker.log',
+    //     filePath: '/var/log/invite-tracker.log',
     // }
 };
 

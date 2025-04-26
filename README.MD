@@ -31,8 +31,8 @@ A Discord bot built with Node.js and discord.js v14 to track user-generated invi
 
 1.  **Clone the Repository:**
     ```bash
-    git clone <your-repository-url>
-    cd dcinvitetracker
+    git clone https://github.com/rafalohaki/invite-tracker
+    cd invite-tracker
     ```
 
 2.  **Install Dependencies:**
@@ -54,7 +54,7 @@ A Discord bot built with Node.js and discord.js v14 to track user-generated invi
     *   **Copy the Client ID:** Go to the "OAuth2" -> "General" tab and copy the "Application ID" (this is your Client ID).
 
 4.  **Configure Environment Variables:**
-    *   Create a file named `.env` in the root directory (`dcinvitetracker`).
+    *   Create a file named `.env` in the root directory (`invite-tracker`).
     *   Add the following variables, replacing the placeholders with your actual values:
 
     ```dotenv
@@ -67,7 +67,7 @@ A Discord bot built with Node.js and discord.js v14 to track user-generated invi
     CLIENT_ID=YOUR_CLIENT_ID_HERE
 
     # Your MongoDB Connection String (URI)
-    # Example for local: mongodb://localhost:27017/dcinvitetracker
+    # Example for local: mongodb://localhost:27017/invite-tracker
     # Example for Atlas: mongodb+srv://<username>:<password>@<cluster-url>/<database-name>?retryWrites=true&w=majority
     MONGODB_URI=YOUR_MONGODB_CONNECTION_STRING_HERE
 
@@ -103,7 +103,7 @@ A Discord bot built with Node.js and discord.js v14 to track user-generated invi
     *   Paste the URL into your browser and select the server you want to add the bot to. Authorize the bot.
 
 6.  **Deploy Slash Commands:**
-    *   Open your terminal in the project directory (`dcinvitetracker`).
+    *   Open your terminal in the project directory (`invite-tracker`).
     *   Run the deployment script:
         ```bash
         node deploy-commands.js
