@@ -125,11 +125,11 @@ module.exports = {
             const embed = new EmbedBuilder()
                 .setColor(CHECK_COMMAND_CONFIG.embedColor) // Use configured color
                 .setTitle(`📊 Invite Stats for ${targetUser.username}`)
-                .setDescription(`Showing invite details for **${targetUser.tag}** in **${guild.name}**.`)
+                .setDescription(`Informacje invite dla **${targetUser.tag}** na serwerze **${guild.name}**.`)
                 .addFields(
-                    { name: '🔗 Tracked Invite Link', value: `https://discord.gg/${inviteCode}` },
-                    { name: '✅ Validated Invites', value: `\`${validatedCount}\``, inline: true },
-                    { name: '⏳ Pending Invites', value: `\`${pendingCount}\``, inline: true }
+                    { name: '🔗 Link Zaproszenia', value: `https://discord.gg/${inviteCode}` },
+                    { name: '✅ Prawidłowe (Validated)', value: `\`${validatedCount}\``, inline: true },
+                    { name: '⏳ Oczekujące (Pending)', value: `\`${pendingCount}\``, inline: true }
                 )
                 .setFooter({ text: countError ? `Requested by ${user.tag} | Counts may be inaccurate due to DB error.` : `Requested by ${user.tag} | Validated = stayed 1 week` })
                 .setTimestamp();
