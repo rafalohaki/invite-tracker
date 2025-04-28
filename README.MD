@@ -61,6 +61,7 @@ A Node.js/discord.js v14 bot to track user-generated invites, validate joins bas
     DISCORD_TOKEN=YOUR_BOT_TOKEN_HERE
     CLIENT_ID=YOUR_CLIENT_ID_HERE
     MONGODB_URI=YOUR_MONGODB_CONNECTION_STRING_HERE
+    ADMIN_ID=YOUR_ADMIN_ID_HERE
 
     # --- Optional ---
     # TEST_GUILD_ID=YOUR_TEST_SERVER_ID_HERE # For faster command testing
@@ -99,6 +100,7 @@ A Node.js/discord.js v14 bot to track user-generated invites, validate joins bas
 
 *   `/invite`: Shows your invite link, validated (stayed > 1 week) & pending counts. Auto-generates link if needed.
 *   `/leaderboard`: Displays top users by validated invite count.
+*   `/check <user>`: **[Admin Only]** Displays the invite link, validated, and pending counts for the specified user. Requires `ADMIN_ID` to be set in `.env`.
 
 ## 💡 Deployment Notes
 
