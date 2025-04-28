@@ -26,7 +26,7 @@ module.exports = {
      */
     data: new SlashCommandBuilder()
         .setName('invite')
-        // Updated description (shorter):
+        // Updated description (shorter) - English is fine for command description:
         .setDescription('Shows your invite link, validated count (stayed > 1 week), and pending count.'),
 
     /**
@@ -37,11 +37,13 @@ module.exports = {
         const { user, guild, channel } = interaction;
         // Enhanced log prefix for safety, using optional chaining for guild ID initially
         const logPrefix = `[InviteCmd][Guild:${guild?.id ?? 'N/A'}][User:${user.id}]`;
+        const t = interaction.client.t; // Translator shortcut
 
         // Ensure the command is run within a server channel
         if (!guild || !channel) {
             console.warn(`${logPrefix} Command used outside of a guild channel?`);
-            return interaction.reply({ content: 'This command can only be used within a server channel.', ephemeral: true });
+            // Use translator
+            return interaction.reply({ content: t('general.error_guild_only'), ephemeral: true });
         }
 
         // Acknowledge the command immediately; fetching/creating invites might take time.
@@ -50,7 +52,8 @@ module.exports = {
         } catch (deferError) {
             console.error(`${logPrefix} Failed to defer reply:`, deferError);
             try {
-                 await interaction.reply({ content: 'An error occurred while starting the command. Please try again.', ephemeral: true });
+                 // Use translator
+                 await interaction.reply({ content: t('invite.error_start_command'), ephemeral: true });
             } catch (replyError) {
                  console.error(`${logPrefix} Failed to send fallback reply after deferral failure:`, replyError);
             }
@@ -80,7 +83,7 @@ module.exports = {
                         inviteCode = null;
                     } else {
                         console.error(`${logPrefix} Unexpected error verifying stored invite ${inviteCode}:`, error);
-                        inviteExistsOnDiscord = false;
+                        inviteExistsOnDiscord = false; // Assume invalid on other errors too
                     }
                 }
             }
@@ -88,6 +91,7 @@ module.exports = {
             // --- Step 3: Create New Invite if Necessary ---
             if (!inviteCode || !inviteExistsOnDiscord) {
                  console.log(`${logPrefix} No valid invite exists in DB or on Discord. Attempting to create one...`);
+                 // Fetch bot member object safely
                  const botMember = guild.members.me ?? await guild.members.fetchMe().catch(fetchErr => {
                     console.error(`${logPrefix} Failed to fetch bot member object:`, fetchErr);
                     return null;
@@ -95,24 +99,29 @@ module.exports = {
 
                  if (!botMember) {
                      console.error(`${logPrefix} Could not obtain bot member object.`);
-                     return interaction.editReply({ content: 'An internal error occurred (could not determine bot permissions). Please try again later.', ephemeral: true });
+                     // Use translator
+                     return interaction.editReply({ content: t('invite.error_internal_bot_perms'), ephemeral: true });
                  }
 
+                 // Check permissions in the specific channel
                  const channelPermissions = channel.permissionsFor(botMember);
                  if (!channelPermissions || !channelPermissions.has(PermissionsBitField.Flags.CreateInstantInvite)) {
                     console.warn(`${logPrefix} Bot lacks CreateInstantInvite permission in channel ${channel.id} (${channel.name}).`);
-                    return interaction.editReply({ content: `I don't have permission to create invites in the channel **#${channel.name}**. Please ask an admin for permission or try another channel.`, ephemeral: true });
+                    // Use translator
+                    return interaction.editReply({ content: t('invite.error_permission_create', { channel_name: channel.name }), ephemeral: true });
                 }
 
+                // Try creating the invite
                 try {
                     const newInvite = await channel.createInvite({
-                        maxAge: 0,
-                        maxUses: 0,
-                        unique: true,
+                        maxAge: 0, // Permanent
+                        maxUses: 0, // Unlimited uses
+                        unique: true, // Attempt to get a unique code
                         reason: `Generated for user ${user.tag} (${userId}) via /invite command (Validated Tracking)`
                     });
                     console.log(`${logPrefix} Successfully created new invite: ${newInvite.code}`);
 
+                    // Save or update the invite code in the database
                     userInviteDoc = await UserInvite.findOneAndUpdate(
                         { userId, guildId },
                         { $set: { inviteCode: newInvite.code } },
@@ -120,22 +129,26 @@ module.exports = {
                     ).lean();
 
                      if (!userInviteDoc) {
-                         throw new Error('Failed to save or update the invite code in the database after creation.');
+                         // Use translator key, but error message itself is good for logs
+                         throw new Error(t('invite.error_failed_create_save'));
                      }
                     inviteCode = newInvite.code;
 
                  } catch (error) {
                      console.error(`${logPrefix} Failed to create invite or save/update in DB:`, error);
+                     // Check for specific permissions error during creation
                      if (error instanceof DiscordAPIError && error.code === DISCORD_ERROR_CODES.MISSING_PERMISSIONS) {
-                        return interaction.editReply({ content: `I encountered a permission error creating the invite in **#${channel.name}**. Please check my 'Create Invite' permission.`, ephemeral: true });
+                        // Use translator
+                        return interaction.editReply({ content: t('invite.error_permission_create_generic', { channel_name: channel.name }), ephemeral: true });
                      }
-                    throw new Error('Failed to create or save a new invite link.');
+                    // Use translator key for generic create/save error
+                     throw new Error(t('invite.error_failed_create_save'));
                  }
             }
 
             // --- Step 4: Get Validated and Pending Invite Counts ---
             let validatedCount = 0;
-            let pendingCount = 0; // <-- Initialize pending count
+            let pendingCount = 0;
             let countError = false; // Flag for any count error
 
             if (inviteCode) {
@@ -148,59 +161,68 @@ module.exports = {
                     });
                 } catch (dbError) {
                     console.error(`${logPrefix} Failed to query validated join count:`, dbError);
-                    validatedCount = 0;
+                    validatedCount = 0; // Default to 0 on error
                     countError = true; // Mark error
                 }
 
                 // Get Pending Count
                 try {
-                    pendingCount = await TrackedJoin.countDocuments({ // <-- New query
+                    pendingCount = await TrackedJoin.countDocuments({
                         guildId: guildId,
                         inviterId: userId, // Query by the user who ran the command
-                        status: 'pending'  // <-- Query for pending status
+                        status: 'pending'  // Query for pending status
                     });
                 } catch (dbError) {
                     console.error(`${logPrefix} Failed to query pending join count:`, dbError);
-                    pendingCount = 0;
+                    pendingCount = 0; // Default to 0 on error
                     countError = true; // Mark error (can be the same flag)
                 }
 
             } else {
-                 console.error(`${logPrefix} Error: No valid inviteCode available to query counts.`);
+                 // This case should ideally not be reached due to creation logic, but handle defensively
+                 console.error(`${logPrefix} Error: No valid inviteCode available to query counts after creation attempt.`);
                  countError = true;
             }
 
             // --- Step 5: Build and Send Response Embed ---
+            // Build embed using translator
             const embed = new EmbedBuilder()
                 .setColor(INVITE_COMMAND_CONFIG.embedColor)
-                .setTitle(`${user.username}'s Invite Link`)
-                .setDescription(`Oto twój link do **${guild.name}**. Udostępnij go znajomym!\nZaproszona osoba zalicza się dopiero po tygodniu bycia na serwerze (status 'validated'). Osoby oczekujące ('pending') jeszcze nie ukończyły tego okresu.`) // Description for embed is fine
+                // Use translator for title and description
+                .setTitle(t('invite.embed_title', { username: user.username }))
+                .setDescription(t('invite.embed_description', { guild_name: guild.name }))
                 .addFields(
-                    { name: '🔗 Link Zaproszenia', value: inviteCode ? `https://discord.gg/${inviteCode}` : '`Error: Could not retrieve or generate link.`' },
-                    { name: '✅ Prawidłowe (Validated)', value: `\`${validatedCount}\``, inline: true },
-                    { name: '⏳ Oczekujące (Pending)', value: `\`${pendingCount}\``, inline: true } // <-- Added Pending field
+                    // Use translator for field names and error value
+                    { name: t('invite.link_field_name'), value: inviteCode ? `https://discord.gg/${inviteCode}` : t('invite.error_no_link') },
+                    { name: t('invite.validated_field_name'), value: `\`${validatedCount}\``, inline: true },
+                    { name: t('invite.pending_field_name'), value: `\`${pendingCount}\``, inline: true }
                 )
-                .setFooter({ text: countError ? 'Invite counts may be inaccurate due to a DB error.' : 'Validated = stayed 1 week | Pending = awaiting 1 week' }) // Updated footer
+                // Use translator for footer text
+                .setFooter({ text: countError ? t('invite.footer_db_error') : t('invite.footer_success') })
                 .setTimestamp();
 
+            // Send the final reply
             await interaction.editReply({ embeds: [embed] });
 
         } catch (error) {
+            // Catch any critical errors during the process
             console.error(`${logPrefix} Critical error executing /invite command:`, error);
-            const userErrorMessage = `An unexpected error occurred: ${error.message || 'Unknown error'}. Please try again later or contact an admin.`;
+            // Use translator for the generic critical error message
+            const userErrorMessage = t('invite.error_critical', { error_message: error.message || 'Unknown error' });
 
             try {
-                // Check if interaction is still editable and was deferred before attempting to edit.
-                // Ensure it's not already replied to, as editReply might fail if a direct reply happened due to deferral failure.
+                // Attempt to inform the user about the critical error
                 if (!interaction.replied && interaction.deferred) {
                    await interaction.editReply({ content: userErrorMessage, embeds: [], ephemeral: true });
                 } else if (interaction.replied) {
                     // If already replied (e.g., initial error message after defer fail), use followUp
                     await interaction.followUp({ content: userErrorMessage, ephemeral: true });
                 } else {
+                     // Log if we can't send the error message
                      console.warn(`${logPrefix} Could not edit or follow up reply with error message (interaction state unexpected).`);
                 }
             } catch (editError) {
+                 // Log if sending the error message itself fails
                  console.error(`${logPrefix} Failed to edit or follow up reply with error message:`, editError);
             }
         }

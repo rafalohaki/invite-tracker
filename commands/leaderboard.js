@@ -11,8 +11,6 @@ const config = require('../config');
 // Configuration for the leaderboard appearance and behavior
 const LEADERBOARD_CONFIG = config.leaderboard;
 
-// Cache removed as counts depend on dynamic validation status. Re-adding requires careful invalidation logic.
-
 module.exports = {
     /**
      * @description Slash command definition.
@@ -20,6 +18,7 @@ module.exports = {
      */
     data: new SlashCommandBuilder()
         .setName('leaderboard')
+        // English description is fine
         .setDescription(`Shows the top ${LEADERBOARD_CONFIG.limit} inviters based on validated invites (user stayed > 1 week).`),
 
     /**
@@ -28,10 +27,12 @@ module.exports = {
      */
     async execute(interaction) {
         const { guild } = interaction;
+        const t = interaction.client.t; // Translator shortcut
 
         // Ensure the command is run within a server
         if (!guild) {
-            return interaction.reply({ content: 'This command can only be used within a server.', ephemeral: true });
+            // Use translator
+            return interaction.reply({ content: t('general.error_guild_only'), ephemeral: true });
         }
 
         // Acknowledge the command immediately; aggregation and member fetching can take time.
@@ -43,7 +44,6 @@ module.exports = {
             console.log(`${logPrefix} Aggregating validated joins from DB...`);
 
             // --- Step 1: Aggregate Validated Joins from Database ---
-            // Use MongoDB's aggregation pipeline for efficient processing directly in the database.
             const leaderboardData = await TrackedJoin.aggregate([
                 {
                     // Filter documents to include only 'validated' joins within the specific guild.
@@ -74,37 +74,38 @@ module.exports = {
             // Handle cases where no validated invites exist yet.
             if (!leaderboardData || leaderboardData.length === 0) {
                 console.log(`${logPrefix} No validated invites found in DB.`);
-                return interaction.editReply({ content: 'No validated invite data found yet. Users need to join via `/invite` links and stay for 1 week!', ephemeral: true });
+                // Use translator
+                return interaction.editReply({ content: t('leaderboard.no_data'), ephemeral: true });
             }
             console.log(`${logPrefix} Found ${leaderboardData.length} leaderboard entries.`);
 
             // --- Step 2: Fetch Member Details for Usernames ---
-            // The aggregation only returns IDs; we need to fetch usernames for display.
             console.log(`${logPrefix} Fetching member details for top entries...`);
             const leaderboardEntries = [];
             for (const entry of leaderboardData) {
-                let username = `Unknown User (${entry._id})`; // Default fallback if member fetching fails
+                 // Use translator for fallback format
+                let username = t('leaderboard.unknown_user_format', { userId: entry._id });
 
                 try {
                     // Fetch the GuildMember object using the inviter's ID.
                     const member = await guild.members.fetch(entry._id);
 
-                    // Ensure the fetched object is actually a GuildMember (paranoid check).
+                    // Ensure the fetched object is actually a GuildMember.
                     if (member instanceof GuildMember) {
                        username = member.user.tag; // Use "Username#Discriminator" format
                     } else {
-                         // Log if fetch returned something unexpected.
                          console.warn(`${logPrefix} Fetched data for ID ${entry._id} was not a GuildMember.`);
                     }
                 } catch (fetchError) {
-                     // Handle cases where the inviter might have left the server after their invites were validated.
+                     // Handle cases where the inviter might have left the server.
                     if (fetchError.code === 10007 /* Unknown Member */ || fetchError.code === 10013 /* Unknown User */) {
                         console.warn(`${logPrefix} Inviter ${entry._id} not found in guild (likely left).`);
-                        username = `Left User (${entry._id})`; // Indicate the user has left
+                         // Use translator for left user format
+                        username = t('leaderboard.left_user_format', { userId: entry._id });
                     } else {
                         // Log other unexpected errors during member fetching.
                         console.error(`${logPrefix} Error fetching member ${entry._id}:`, fetchError);
-                        // Keep the default 'Unknown User' username.
+                        // Keep the default 'Unknown User' username from translator.
                     }
                 }
                 // Store the processed entry data.
@@ -118,14 +119,17 @@ module.exports = {
             // --- Step 3: Build the Leaderboard Embed ---
             console.log(`${logPrefix} Building leaderboard embed...`);
 
-            // Format each entry into a numbered list string.
+            // Format each entry into a numbered list string using translator.
             const descriptionLines = leaderboardEntries.map((entry, index) => {
-                // Using backticks for the count makes it stand out.
-                return `${index + 1}. **${entry.username}** - \`${entry.count}\` validated invites`;
+                return t('leaderboard.entry_format', {
+                    rank: index + 1,
+                    username: entry.username,
+                    count: entry.count
+                });
             });
 
-            // Join the lines into a single description string, providing a fallback message.
-            let embedDescription = descriptionLines.join('\n') || 'No validated invites yet.';
+            // Join the lines, providing a fallback message using translator if no entries processed.
+            let embedDescription = descriptionLines.join('\n') || t('leaderboard.no_data'); // Fallback
 
             // Discord embed descriptions have a character limit (4096). Truncate if necessary.
             if (embedDescription.length > 4096) {
@@ -133,28 +137,29 @@ module.exports = {
                 embedDescription = embedDescription.substring(0, 4090) + '\n...'; // Truncate slightly below limit
             }
 
-            // Construct the embed object.
+            // Construct the embed object using translator.
             const embed = new EmbedBuilder()
                 .setColor(LEADERBOARD_CONFIG.embedColor)
-                .setTitle(`🏆 Validated Invite Leaderboard for ${guild.name}`)
+                // Use translator for title and footer
+                .setTitle(t('leaderboard.embed_title', { guild_name: guild.name }))
                 .setDescription(embedDescription)
                 .setTimestamp()
-                // Footer clarifies the scope and validation criteria.
-                .setFooter({ text: `Showing Top ${leaderboardEntries.length} | Invites count after 1 week stay` });
-                // Consider adding total validated invites in the server (requires another DB query) if desired.
+                // Footer clarifies the scope and validation criteria using translator.
+                .setFooter({ text: t('leaderboard.footer_text', { count: leaderboardEntries.length }) });
 
             // Edit the deferred reply with the final embed.
             await interaction.editReply({ embeds: [embed] });
             console.log(`${logPrefix} Successfully displayed leaderboard.`);
 
         } catch (error) {
-            // Catch any unhandled errors during aggregation, fetching, or embed building.
+            // Catch any unhandled errors.
             console.error(`[LeaderboardCmd][Guild:${guild.id}] Critical error in execute block:`, error);
 
-            // Provide a generic error message to the user.
-            const userErrorMessage = 'An unexpected error occurred while generating the leaderboard. Please try again later.';
+            // Provide a generic error message to the user using translator.
+            const userErrorMessage = t('leaderboard.error_critical');
 
             // Edit the deferred reply with the error message.
+            // Check if deferred/replied to avoid errors when editing.
             if (interaction.deferred || interaction.replied) {
                  await interaction.editReply({ content: userErrorMessage, ephemeral: true });
             }

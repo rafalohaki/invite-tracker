@@ -3,19 +3,23 @@
  * @description Main entry point for the Discord Invite Tracker bot.
  * Initializes the Discord client, connects to the database, loads commands,
  * handles events (ready, interactions, member joins/leaves), manages invite caching,
- * and runs the periodic join validation task.
+ * runs the periodic join validation task, and supports custom translations.
  */
 
 // Load environment variables from .env file early
 require('dotenv').config();
 const fs = require('node:fs');
 const path = require('node:path');
-const { Client, GatewayIntentBits, Collection, Events, Partials, DiscordAPIError, PermissionsBitField } = require('discord.js'); // Added PermissionsBitField
+const { Client, GatewayIntentBits, Collection, Events, Partials, DiscordAPIError, PermissionsBitField, ActivityType } = require('discord.js'); // Added PermissionsBitField, ActivityType
 const mongoose = require('mongoose'); // Required for graceful shutdown
 const connectDB = require('./database/connection');
 const UserInvite = require('./database/models/UserInvite'); // Needed for attributing joins and cleanup
 const TrackedJoin = require('./database/models/TrackedJoin'); // Needed for tracking and validation
 const config = require('./config'); // Load bot configuration
+const { loadTranslations, t } = require('./utils/translator'); // <-- Import translator
+
+// --- Load Translations ---
+loadTranslations(); // <-- Load translations immediately after imports
 
 // --- Configuration & Constants ---
 
@@ -64,6 +68,7 @@ if (!MONGODB_URI) {
 
 console.log(`[Config] Validation Period: ${validationPeriodDays} days (${VALIDATION_PERIOD_MS}ms)`);
 console.log(`[Config] Validation Check Interval: ${validationCheckIntervalMinutes} minutes (${VALIDATION_CHECK_INTERVAL_MS}ms)`);
+console.log(`[Config] Locale setting (LOCALE_LANG): ${process.env.LOCALE_LANG || 'en (default)'}`); // Log locale setting
 
 
 // --- Database Connection ---
@@ -87,6 +92,9 @@ const client = new Client({
         // Add other partials if needed (e.g., Partials.User, Partials.Channel) depending on future features
     ]
 });
+
+// --- Translator Attachment ---
+client.t = t; // <-- Attach translator function `t` to the client object
 
 // --- Command Handling Setup ---
 // Use a Discord.js Collection to store commands, mapping command name to module.
@@ -181,9 +189,10 @@ client.once(Events.ClientReady, async readyClient => {
     console.log(`Logged in as ${readyClient.user.tag} (ID: ${readyClient.user.id})`);
     console.log(`Operating in ${readyClient.guilds.cache.size} guild(s).`);
 
-    // Validate activity type - LISTENING is deprecated, use ActivityType enum or string values like 'Listening'
+    // Use translator for activity text
     try {
-        readyClient.user.setActivity(`/invite | /leaderboard`, { type: 'Listening' }); // Adjust type as needed (Playing, Watching, Competing) - use string for now
+        const activityText = client.t('general.activity_text'); // <-- Use translator
+        readyClient.user.setActivity(activityText, { type: ActivityType.Listening }); // Use enum for clarity
     } catch (activityError) {
         console.error("Error setting bot activity:", activityError);
         // Fallback or alternative activity setting
@@ -236,10 +245,10 @@ client.on(Events.InteractionCreate, async interaction => {
     if (!command) {
         console.error(`[Interaction] No command matching '${interaction.commandName}' was found.`);
         try {
-             // Inform the user that the command is unavailable.
-             await interaction.reply({ content: 'Error: This command seems to be unregistered or invalid.', ephemeral: true });
+             // Use translator for unknown command error
+             await interaction.reply({ content: interaction.client.t('general.error_unknown_command'), ephemeral: true }); // <-- Use translator
         } catch (replyError) {
-             // Log if replying to the interaction fails.
+             // Log if replying to the interaction fails. Use English for internal log.
              console.error(`[Interaction] Failed to reply to unknown command interaction:`, replyError);
         }
         return;
@@ -251,13 +260,14 @@ client.on(Events.InteractionCreate, async interaction => {
 
     try {
         // Execute the command's logic, passing the interaction object.
+        // The translator `t` is available within commands via `interaction.client.t`
         await command.execute(interaction);
     } catch (error) {
         // Catch and log any errors that occur during command execution.
         console.error(`${logPrefix} Execution Error:`, error);
 
-        // Inform the user about the error gracefully, without exposing internal details.
-        const errorMessage = 'Sorry, an unexpected error occurred while executing that command. Please try again later.';
+        // Inform the user about the error gracefully, using translator.
+        const errorMessage = interaction.client.t('general.error_command_execution'); // <-- Use translator
         try {
             // Check if the interaction has already been replied to or deferred.
             if (interaction.replied || interaction.deferred) {
@@ -268,7 +278,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 await interaction.reply({ content: errorMessage, ephemeral: true });
             }
         } catch (replyError) {
-             // Log if sending the error reply itself fails.
+             // Log if sending the error reply itself fails. Use English for internal log.
              console.error(`${logPrefix} Failed to send error reply to user:`, replyError);
         }
     }
@@ -330,7 +340,7 @@ client.on(Events.GuildMemberAdd, async member => {
     } catch (dbError) {
          console.error(`${logPrefix} Database error fetching UserInvites:`, dbError);
          // Update cache anyway before returning, as state has changed.
-         await cacheGuildInvites(guild);
+         await cacheGuildInvites(guild); // Update cache even on DB error before exiting this handler
          return;
     }
 
@@ -398,8 +408,7 @@ client.on(Events.GuildMemberAdd, async member => {
             // Clean it up from the cache if it was present.
             cachedUses?.delete(userInvite.inviteCode); // Remove from the live cache map if cache exists
 
-            // *** FIX: Delete the stale UserInvite record from the database ***
-            // Use deleteOne for precision. Add promise to array for parallel execution.
+            // Delete the stale UserInvite record from the database
             processingPromises.push(
                 UserInvite.deleteOne({ _id: userInvite._id }) // Assuming lean() still provides _id
                     .then(() => console.log(`${logPrefix} Successfully deleted stale UserInvite record for code ${userInvite.inviteCode}.`))
@@ -419,19 +428,17 @@ client.on(Events.GuildMemberAdd, async member => {
             // Create or update a TrackedJoin document for this join event.
             // Using findOneAndUpdate with upsert:true prevents duplicate 'pending' records
             // if the same user joins rapidly or if event processing is delayed.
-            // It finds an existing 'pending' join for this invitee and updates it, or creates a new one.
             await TrackedJoin.findOneAndUpdate(
                 { guildId: guild.id, inviteeId: user.id, status: 'pending' }, // Query: Look for existing pending join by this specific invitee
                 { // Data to insert or update with:
-                    $set: { // Use $set to avoid overwriting existing fields unintentionally if upserting an existing doc
+                    $set: {
                         guildId: guild.id,
                         inviteeId: user.id,
-                        inviterId: attributedInviterId,     // The attributed inviter
-                        inviteCodeUsed: attributedInviteCode, // The invite code used
-                        joinTimestamp: new Date(),         // Record the join time accurately
-                        status: 'pending',                 // Set initial status
+                        inviterId: attributedInviterId,
+                        inviteCodeUsed: attributedInviteCode,
+                        joinTimestamp: new Date(),
+                        status: 'pending',
                      },
-                     // Removed $setOnInsert as we handle defaults via schema or the $set structure above
                  },
                  { upsert: true, new: true, setDefaultsOnInsert: true } // Options: Create if not found, return new doc, apply defaults
             );
@@ -459,39 +466,28 @@ client.on(Events.GuildMemberAdd, async member => {
 // Fired when a user leaves or is kicked/banned from a guild the bot is in.
 client.on(Events.GuildMemberRemove, async member => {
     // --- Handle Partial Member Data ---
-    // The 'member' object might be partial if the member wasn't cached when they left.
-    // We need to attempt fetching the full member data to ensure we have IDs.
     if (member.partial) {
         try {
-            // Attempt to fetch the full member object from the API.
             await member.fetch();
-             // Use optional chaining for safety as `user` might still be null in rare cases.
              console.log(`[GuildMemberRemove][Guild:${member.guild?.id}] Fetched partial member ${member.user?.tag ?? member.id}`);
         } catch (error) {
-            // Check if the error is due to the member being gone (expected) or another issue
             if (error instanceof DiscordAPIError && (error.code === DISCORD_ERROR_CODES.UNKNOWN_MEMBER || error.code === DISCORD_ERROR_CODES.UNKNOWN_USER)) {
-                // This is expected if the user is truly gone, we can proceed if IDs are present.
                  console.log(`[GuildMemberRemove][Guild:${member.guild?.id}] Partial member ${member.id} could not be fully fetched (likely already gone), proceeding with available data.`);
             } else {
-                // Log unexpected errors during fetch
                  console.error(`[GuildMemberRemove][Guild:${member.guild?.id}] Failed to fetch partial member ${member.id}:`, error);
             }
-            // Proceed only if critical IDs are available even after fetch failure/expected error.
             if (!member.user || !member.guild) {
                  console.error(`[GuildMemberRemove] Partial member object missing critical IDs (user or guild) after fetch attempt. Cannot process leave for ${member.id}.`);
-                 return; // Cannot proceed without user and guild IDs.
+                 return;
             }
         }
     }
 
     // --- Get IDs (Ensure they are available) ---
-    // Safely access IDs, falling back to null if somehow unavailable after partial handling.
     const guildId = member.guild?.id;
-    const userId = member.user?.id; // This is the ID of the user who LEFT
+    const userId = member.user?.id;
 
-    // Final check for necessary IDs before proceeding.
     if (!guildId || !userId) {
-         // Log if IDs couldn't be obtained even after attempting fetch.
          console.error(`[GuildMemberRemove] Could not obtain Guild ID or User ID for leaving member (ID: ${member.id}).`);
          return;
     }
@@ -501,159 +497,107 @@ client.on(Events.GuildMemberRemove, async member => {
 
     try {
         // --- Update TrackedJoin Status ---
-        // Find any 'pending' join records for the user who left this specific guild.
-        // Use updateMany for safety, although typically there should only be one pending record per user per guild.
         const result = await TrackedJoin.updateMany(
             {
-                guildId: guildId,    // Match the guild
-                inviteeId: userId,   // Match the user who left
-                status: 'pending',   // Only update records that are still pending validation
+                guildId: guildId,
+                inviteeId: userId,
+                status: 'pending',
             },
             {
-                // Set the status to 'left_early' and record the timestamp.
                 $set: {
                     status: 'left_early',
-                    leaveTimestamp: new Date() // Record when the leave was processed
+                    leaveTimestamp: new Date()
                 }
             }
         );
 
-        // Log how many records were updated.
         if (result.modifiedCount > 0) {
-            // `matchedCount` = found records matching filter; `modifiedCount` = records actually changed.
             console.log(`${logPrefix} Found and updated ${result.modifiedCount} pending join record(s) for user to 'left_early'.`);
         } else {
-            // It's normal for this to find 0 records if the user wasn't tracked or had already been validated/left.
             // console.log(`${logPrefix} No pending join record found for this user.`); // Less verbose logging
         }
     } catch (error) {
-        // Log errors during the database update process.
         console.error(`${logPrefix} Error updating join status on leave:`, error);
     }
 });
 
 // --- Periodic Validation Function ---
 /**
- * Checks for 'pending' joins that are older than the defined validation period
- * and updates their status to 'validated' if the member is still in the guild,
- * or 'left_early' if they are not found.
- * NOTE: For very large servers, consider implementing batching or cursor-based processing
- *       to avoid high memory usage when fetching many pending joins.
+ * Checks for 'pending' joins older than the validation period.
+ * Updates status to 'validated' if member is still present, or 'left_early' if not.
  */
 async function validatePendingJoins() {
     const logPrefix = '[ValidationTask]';
     console.log(`${logPrefix} Running validation check...`);
 
-    // Calculate the cutoff date: joins before this date are eligible for validation.
     const validationCutoffDate = new Date(Date.now() - VALIDATION_PERIOD_MS);
 
     try {
         // --- Query for Candidate Joins ---
-        // Find all TrackedJoin documents that are still 'pending' and were created
-        // at or before the cutoff date.
         const joinsToValidateQuery = {
             status: 'pending',
-            joinTimestamp: { $lte: validationCutoffDate } // less than or equal to cutoff date
+            joinTimestamp: { $lte: validationCutoffDate }
         };
 
-        // Fetch candidate documents. Using .lean() improves performance as we only need the data.
-        // SCALABILITY NOTE: For extremely large numbers of pending joins, fetch in batches
-        // using .limit() and .skip() or use a Mongoose cursor (.cursor().eachAsync())
-        // to avoid loading all candidates into memory at once.
+        // Using .lean() for performance. Consider batching/cursors for large scale.
         const candidates = await TrackedJoin.find(joinsToValidateQuery).lean();
 
         if (candidates.length === 0) {
             // console.log(`${logPrefix} No pending joins found meeting validation criteria.`); // Less verbose
-            return; // Nothing to do
+            return;
         }
 
         console.log(`${logPrefix} Found ${candidates.length} candidate join(s) for validation.`);
 
         // --- Prepare Bulk Operations ---
-        const bulkOps = []; // Array to hold MongoDB bulk write operations
-        const validationTime = new Date(); // Consistent timestamp for this validation batch
-        // Cache member presence checks *within this run* to avoid multiple fetches for the same user/guild if they have multiple pending joins (unlikely but possible).
-        const guildMemberPresenceCache = new Map(); // <guildId-userId, boolean>
+        const bulkOps = [];
+        const validationTime = new Date();
+        const guildMemberPresenceCache = new Map(); // Cache presence checks for this run
 
         // --- Iterate and Verify Member Presence ---
         for (const join of candidates) {
-            let guild = client.guilds.cache.get(join.guildId); // Get guild from bot's cache
+            let guild = client.guilds.cache.get(join.guildId);
             if (!guild) {
-                // If the guild isn't in the cache (e.g., bot left the guild), skip this record.
                 console.warn(`${logPrefix} Guild ${join.guildId} not found in cache during validation for user ${join.inviteeId}. Skipping.`);
-                // Consider adding logic here to mark these joins as 'unknown' or 'guild_unavailable' if needed.
                 continue;
             }
 
             let memberStillPresent = false;
-            const memberCacheKey = `${join.guildId}-${join.inviteeId}`; // Unique key for the cache
+            const memberCacheKey = `${join.guildId}-${join.inviteeId}`;
 
-            // Check run-specific cache first to avoid redundant API calls
             if (guildMemberPresenceCache.has(memberCacheKey)) {
                 memberStillPresent = guildMemberPresenceCache.get(memberCacheKey);
-                 // console.log(`${logPrefix} Using cached presence (${memberStillPresent}) for ${memberCacheKey}`); // Verbose logging
+                if (memberStillPresent === 'error_skip') continue; // Skip if marked as error previously in this run
             } else {
-                // Member presence not cached for this run, check Discord API.
                 try {
-                    // Attempt to fetch the member from the guild. If successful, they are present.
-                    // Using `fetch({ user: ID })` is generally efficient. `force: false` uses Discord cache first.
                     await guild.members.fetch({ user: join.inviteeId, force: false });
                     memberStillPresent = true;
-                    // console.log(`${logPrefix} Member ${join.inviteeId} found in guild ${join.guildId}.`); // Verbose logging
                 } catch (error) {
-                    // Check for specific errors indicating the member is not found.
                     if (error instanceof DiscordAPIError && (error.code === DISCORD_ERROR_CODES.UNKNOWN_MEMBER || error.code === DISCORD_ERROR_CODES.UNKNOWN_USER)) {
-                        // Member is confirmed to be no longer in the guild.
                         memberStillPresent = false;
-                        // console.log(`${logPrefix} Member ${join.inviteeId} NOT found in guild ${join.guildId} (Error Code: ${error.code}).`); // Verbose logging
                     } else {
-                        // Log other unexpected errors during fetch (e.g., rate limits, network issues, permissions).
                         console.error(`${logPrefix} Unexpected error fetching member ${join.inviteeId} in guild ${join.guildId} during validation:`, error);
-                        // Skip processing this join for now, hoping the error resolves by the next check.
-                        // Add this candidate to the cache as 'undetermined' for this run to avoid retrying immediately.
-                        guildMemberPresenceCache.set(memberCacheKey, 'error_skip');
-                        continue;
+                        guildMemberPresenceCache.set(memberCacheKey, 'error_skip'); // Mark to skip retries this run
+                        continue; // Skip this join record for now
                     }
                 }
-                // Cache the result (true or false) for this run
-                guildMemberPresenceCache.set(memberCacheKey, memberStillPresent);
-            }
-
-             // If presence was 'error_skip' from cache, skip bulk op prep
-             if (guildMemberPresenceCache.get(memberCacheKey) === 'error_skip') {
-                continue;
+                guildMemberPresenceCache.set(memberCacheKey, memberStillPresent); // Cache the result for this run
             }
 
             // --- Prepare Bulk Operation based on Presence ---
             if (memberStillPresent) {
-                // Member is still in the guild, mark the join as 'validated'.
                 bulkOps.push({
                     updateOne: {
-                        // Filter precisely by document ID and ensure status is still 'pending'
-                        // (in case it changed between the initial find and now).
                         filter: { _id: join._id, status: 'pending' },
-                        update: {
-                            $set: {
-                                status: 'validated',
-                                validationTimestamp: validationTime // Record when validation occurred
-                            }
-                        }
+                        update: { $set: { status: 'validated', validationTimestamp: validationTime } }
                     }
                 });
             } else {
-                // Member was not found in the guild. Mark as 'left_early' retroactively.
-                // This handles cases where the GuildMemberRemove event was missed (e.g., bot offline).
                 console.log(`${logPrefix} User ${join.inviteeId} (Join ID: ${join._id}) not found in guild ${join.guildId}. Marking as 'left_early'.`);
                 bulkOps.push({
                      updateOne: {
                          filter: { _id: join._id, status: 'pending' },
-                         update: {
-                             $set: {
-                                 status: 'left_early',
-                                 // Use validationTime as the best guess for when they were confirmed gone.
-                                 leaveTimestamp: validationTime
-                             }
-                         }
+                         update: { $set: { status: 'left_early', leaveTimestamp: validationTime } }
                      }
                  });
             }
@@ -666,31 +610,22 @@ async function validatePendingJoins() {
             console.log(`${logPrefix} Attempting bulk update for ${validatedCount} validations and ${leftEarlyCount} retroactive leaves.`);
 
             try {
-                // Execute all prepared update operations in a single batch.
-                // `ordered: false` allows MongoDB to process operations in parallel (potentially faster)
-                // and continue even if one operation fails.
                 const result = await TrackedJoin.bulkWrite(bulkOps, { ordered: false });
                 console.log(`${logPrefix} Bulk update result: ${result.modifiedCount} document(s) modified (Matched: ${result.matchedCount}, Upserted: ${result.upsertedCount}).`);
 
-                // Optional: Check if the modified count matches the expected count. Mismatches could indicate
-                // race conditions where a record's status changed between the `find` and `bulkWrite`.
-                const expectedModifications = bulkOps.length; // Simpler check based on operations prepared
+                const expectedModifications = bulkOps.length;
                  if (result.modifiedCount !== expectedModifications) {
-                     // This can happen if a record's status changed (e.g., to 'left_early' by GuildMemberRemove) between the find and bulkWrite.
-                     console.warn(`${logPrefix} Mismatch in expected modified count. Expected ${expectedModifications}, Got ${result.modifiedCount}. Some records might have changed status or failed update individually (check MongoDB logs if needed).`);
+                     console.warn(`${logPrefix} Mismatch in expected modified count. Expected ${expectedModifications}, Got ${result.modifiedCount}. Some records might have changed status or failed update individually.`);
                  }
             } catch (bulkWriteError) {
                 console.error(`${logPrefix} Error executing bulk write operation:`, bulkWriteError);
-                 // Handle bulk write errors (e.g., log details, potentially retry failed operations).
-                 // If ordered:false, check bulkWriteError.writeErrors for individual failures.
+                 // Handle bulk write errors if needed
             }
         } else {
-             // This message now accounts for candidates skipped due to errors or missing guilds.
             console.log(`${logPrefix} No update operations to perform after checking member presence/guild status for ${candidates.length} candidate(s).`);
         }
 
     } catch (error) {
-        // Catch errors related to the initial find query or other unexpected issues.
         console.error(`${logPrefix} Critical error during validation process:`, error);
     }
 }
@@ -707,25 +642,22 @@ client.on(Events.GuildCreate, async guild => {
 
 // --- GuildDelete Event ---
 // Fired when the bot leaves or is kicked from a guild.
-client.on(Events.GuildDelete, async guild => { // Made async for potential cleanup
-     // Check if the guild object is available (it might be partial or unavailable if kicked abruptly)
-     if (!guild || !guild.id) { // Only ID is strictly necessary for cache/DB cleanup
+client.on(Events.GuildDelete, async guild => {
+     if (!guild || !guild.id) {
          console.log(`Left or was removed from a guild (ID unavailable or guild object partial). Cache/DB cleanup skipped.`);
          return;
      }
 
      const guildId = guild.id;
-     const guildName = guild.name ?? `ID: ${guildId}`; // Use name if available, else ID
+     const guildName = guild.name ?? `ID: ${guildId}`;
 
      console.log(`Left guild: ${guildName}.`);
      // Clear the invite cache for the guild the bot left.
      inviteUsesCache.delete(guildId);
      console.log(`[GuildDelete] Cleared invite cache for guild ${guildId}.`);
 
-     // Optional: Add database cleanup logic here if desired.
-     // This could involve deleting UserInvite and TrackedJoin records associated with the removed guild.
-     // Use with caution, as this is destructive. Consider adding a config flag to enable/disable this.
-     const performCleanup = process.env.PERFORM_GUILD_DELETE_CLEANUP === 'true'; // Example flag check
+     // Optional database cleanup logic
+     const performCleanup = process.env.PERFORM_GUILD_DELETE_CLEANUP === 'true';
      if (performCleanup) {
         console.log(`[GuildDelete] Initiating database cleanup for guild ${guildId}...`);
         try {
@@ -763,7 +695,6 @@ console.log("Attempting to log in to Discord...");
 client.login(TOKEN).catch(error => {
     // Catch critical errors during the login process.
     console.error("FATAL ERROR: Failed to login to Discord:", error);
-    // Provide specific hints based on common login errors.
     if (error.code === DISCORD_ERROR_CODES.TOKEN_INVALID) {
          console.error("Error details: The DISCORD_TOKEN in your .env file is invalid or missing. Please check it.");
     } else if (error.message.includes('disallowed intents') || error.message.includes('Privileged Intents')) {
@@ -772,25 +703,19 @@ client.login(TOKEN).catch(error => {
     } else {
          console.error("An unexpected error occurred during login. Check network connectivity and Discord status.");
     }
-    // Exit the process if login fails critically.
     process.exit(1);
 });
 
 // --- Graceful Shutdown Integration ---
-// The SIGINT/SIGTERM handlers in connection.js handle mongoose closing.
-// We integrate client destruction before calling the original handler.
+// Handles SIGINT/SIGTERM to close connections properly.
 
-// Helper function to avoid code duplication in signal handlers
 async function shutdown(signal) {
     console.log(`Received ${signal}. Shutting down gracefully...`);
     console.log('Destroying Discord client...');
     client.destroy(); // Close Discord connection
     console.log('Discord client destroyed.');
-    // Now call the gracefulShutdown function exported or defined in connection.js
-    // Assuming connection.js handles mongoose.close() and process.exit()
-    // We need to make sure the DB connection function runs AFTER client.destroy()
 
-    // If connection.js's gracefulShutdown wasn't exported, we replicate its core logic here:
+    // Close MongoDB connection
     console.log(`Closing MongoDB connection via ${signal} handler...`);
     try {
         await mongoose.connection.close();
@@ -804,7 +729,7 @@ async function shutdown(signal) {
 }
 
 // Replace default handlers with our combined shutdown logic
-process.removeAllListeners('SIGINT'); // Remove any default or connection.js handlers first
+process.removeAllListeners('SIGINT'); // Remove any default/previous handlers
 process.on('SIGINT', () => shutdown('SIGINT'));
 
 process.removeAllListeners('SIGTERM');
