@@ -77,6 +77,14 @@ A Node.js/discord.js v14 bot to track user-generated invites, validate joins bas
     # VALIDATION_PERIOD_DAYS=7               # Override default 7 days stay requirement
     # VALIDATION_CHECK_INTERVAL_MINUTES=60   # Override default 60 min validation check
     # PERFORM_GUILD_DELETE_CLEANUP=false     # Set true to delete DB data when bot leaves guild
+
+    # --- Logging Configuration ---
+    # Optional: Set desired logging level (DEBUG, INFO, WARN, ERROR). Defaults to INFO if omitted.
+    # DEBUG: Shows detailed step-by-step information.
+    # INFO: Standard operational information (recommended for production).
+    # WARN: Potential issues or non-critical errors.
+    # ERROR: Critical errors that might affect functionality.
+    LOG_LEVEL=INFO
     ```
 
 5.  **Customize Language (Optional):**
