@@ -394,7 +394,39 @@ async function _createOrUpdatePendingJoin(guildId, inviteeId, inviterId, inviteC
     }
 }
 
-// --- REFACTORED FUNCTION ---
+// --- START REFACTORED SECTION ---
+
+/**
+ * Handles errors encountered while fetching a partial guild member.
+ * Determines if the error means the member left or if it's another issue.
+ * Returns the original partial member if usable as fallback, otherwise null.
+ * @param {Error} error - The error caught during fetch.
+ * @param {import('discord.js').PartialGuildMember} originalMember - The initial partial member object.
+ * @param {string} logPrefix - Prefix for logging.
+ * @returns {import('discord.js').GuildMember | null} Original partial member or null.
+ */
+function _handleFetchMemberError(error, originalMember, logPrefix) {
+    // Check if the error indicates the member is gone
+    const isMemberGoneError = error instanceof DiscordAPIError &&
+                             (error.code === DISCORD_ERROR_CODES.UNKNOWN_MEMBER || error.code === DISCORD_ERROR_CODES.UNKNOWN_USER);
+
+    if (isMemberGoneError) {
+        logInfo(`${logPrefix} Could not fetch partial member (likely already gone - Discord Error ${error.code}).`);
+        // Return the original partial member *only if* it contains the essential IDs for fallback logic
+        if (originalMember.user && originalMember.guild) {
+            logDebug(`${logPrefix} Returning original partial member data as fallback.`);
+            return originalMember; // Return the original partial data
+        } else {
+            logWarn(`${logPrefix} Fetch failed (member gone), and original partial data lacks essential IDs. Cannot proceed.`);
+            return null; // Original partial is also unusable
+        }
+    } else {
+        // Log other types of fetch errors (permissions, network, rate limits, etc.)
+        logError(`${logPrefix} Failed to fetch partial member data due to unexpected error:`, error);
+        return null; // Cannot proceed reliably after other errors
+    }
+}
+
 /**
  * Ensures member object is not partial. Fetches if necessary.
  * Handles errors gracefully, especially when the member might have left.
@@ -404,7 +436,7 @@ async function _createOrUpdatePendingJoin(guildId, inviteeId, inviterId, inviteC
 async function _ensureFullMemberData(member) {
     const logPrefix = `[EnsureMember][Guild:${member.guild?.id ?? 'N/A'}][User:${member.id}]`;
 
-    // 1. Handle non-partial members first (Guard Clause)
+    // 1. Handle non-partial members first
     if (!member.partial) {
         if (!member.user || !member.guild) {
             logWarn(`${logPrefix} Non-partial member object missing critical user/guild data.`);
@@ -426,29 +458,12 @@ async function _ensureFullMemberData(member) {
         logDebug(`${logPrefix} Successfully fetched full member data.`);
         return fullMember;
     } catch (error) {
-        // 3. Handle fetch errors
-        // Check if the error indicates the member is gone
-        const isMemberGoneError = error instanceof DiscordAPIError &&
-                                 (error.code === DISCORD_ERROR_CODES.UNKNOWN_MEMBER || error.code === DISCORD_ERROR_CODES.UNKNOWN_USER);
-
-        if (isMemberGoneError) {
-            logInfo(`${logPrefix} Could not fetch partial member (likely already gone - Discord Error ${error.code}).`);
-            // Return the original partial member *only if* it contains the essential IDs for potential fallback logic
-            if (member.user && member.guild) {
-                logDebug(`${logPrefix} Returning original partial member data as fallback.`);
-                return member; // Return the original partial data
-            } else {
-                logWarn(`${logPrefix} Fetch failed (member gone), and original partial data lacks essential IDs. Cannot proceed.`);
-                return null; // Original partial is also unusable
-            }
-        } else {
-            // Log other types of fetch errors (permissions, network, rate limits, etc.)
-            logError(`${logPrefix} Failed to fetch partial member data due to unexpected error:`, error);
-            return null; // Cannot proceed reliably after other errors
-        }
+        // 3. Handle fetch errors using the extracted method
+        return _handleFetchMemberError(error, member, logPrefix);
     }
 }
-// --- END REFACTORED FUNCTION ---
+
+// --- END REFACTORED SECTION ---
 
 
 /**
@@ -589,7 +604,7 @@ client.on(Events.GuildMemberAdd, async member => {
         // 1. Ensure Full Member Data (Handles partials, returns null if unusable)
         const usableMember = await _ensureFullMemberData(member);
         if (!usableMember) {
-            // Logging handled within _ensureFullMemberData
+            // Logging handled within _ensureFullMemberData or _handleFetchMemberError
             logWarn(`${logPrefixBase} Could not obtain usable member data. Cannot process join.`);
             return;
         }
@@ -669,7 +684,7 @@ client.on(Events.GuildMemberRemove, async member => {
         // 1. Ensure Full Member Data (Handles partials, returns null if unusable)
         const usableMember = await _ensureFullMemberData(member);
          if (!usableMember) { // If null, essential data (guild.id, user.id) was missing or unrecoverable
-             // Logging handled within _ensureFullMemberData
+             // Logging handled within _ensureFullMemberData or _handleFetchMemberError
              logWarn(`${logPrefixBase} Could not obtain usable member data. Cannot accurately process leave.`);
              // Attempt update with just IDs if available *from the original partial*, though less ideal
              if (member.guild?.id && member.id) {
