@@ -75,7 +75,7 @@ const client = new Client({
         GatewayIntentBits.GuildInvites,
         GatewayIntentBits.GuildMembers // PRIVILEGED INTENT
     ],
-    partials: [Partials.GuildMember]
+    partials: [Partials.GuildMember] // Ensure GuildMember partial is enabled
 });
 
 // --- Translator & Command Setup ---
@@ -394,41 +394,62 @@ async function _createOrUpdatePendingJoin(guildId, inviteeId, inviterId, inviteC
     }
 }
 
+// --- REFACTORED FUNCTION ---
 /**
  * Ensures member object is not partial. Fetches if necessary.
+ * Handles errors gracefully, especially when the member might have left.
  * @param {import('discord.js').GuildMember | import('discord.js').PartialGuildMember} member - The member object.
- * @returns {Promise<import('discord.js').GuildMember | null>} Full member object or null if fetch fails critically or essential data missing.
+ * @returns {Promise<import('discord.js').GuildMember | null>} Full member object, the original partial if usable after fetch error, or null.
  */
 async function _ensureFullMemberData(member) {
-    if (member.partial) {
-        const logPrefix = `[PartialFetch][Guild:${member.guild?.id ?? 'N/A'}][User:${member.id}]`;
-        logDebug(`${logPrefix} Member data is partial. Fetching...`);
-        try {
-            const fullMember = await member.fetch();
-            if (!fullMember?.user || !fullMember?.guild) {
-                 logWarn(`${logPrefix} Fetched member but critical user/guild data still missing.`);
-                 return null;
-             }
-            return fullMember;
-        } catch (error) {
-            if (error instanceof DiscordAPIError && (error.code === DISCORD_ERROR_CODES.UNKNOWN_MEMBER || error.code === DISCORD_ERROR_CODES.UNKNOWN_USER)) {
-                logInfo(`${logPrefix} Could not fully fetch partial member (likely already gone). Proceeding with available partial data if possible.`);
-                // Return the partially-fetched member only if critical IDs are still present
-                return (member.user && member.guild) ? member : null;
+    const logPrefix = `[EnsureMember][Guild:${member.guild?.id ?? 'N/A'}][User:${member.id}]`;
+
+    // 1. Handle non-partial members first (Guard Clause)
+    if (!member.partial) {
+        if (!member.user || !member.guild) {
+            logWarn(`${logPrefix} Non-partial member object missing critical user/guild data.`);
+            return null;
+        }
+        logDebug(`${logPrefix} Member data is already full and valid.`);
+        return member;
+    }
+
+    // 2. Handle partial members: Attempt fetch
+    logDebug(`${logPrefix} Member data is partial. Fetching...`);
+    try {
+        const fullMember = await member.fetch();
+        // Check integrity *after* successful fetch
+        if (!fullMember?.user || !fullMember?.guild) {
+            logWarn(`${logPrefix} Fetched member successfully, but critical user/guild data is still missing.`);
+            return null; // Fetch succeeded but result is unusable
+        }
+        logDebug(`${logPrefix} Successfully fetched full member data.`);
+        return fullMember;
+    } catch (error) {
+        // 3. Handle fetch errors
+        // Check if the error indicates the member is gone
+        const isMemberGoneError = error instanceof DiscordAPIError &&
+                                 (error.code === DISCORD_ERROR_CODES.UNKNOWN_MEMBER || error.code === DISCORD_ERROR_CODES.UNKNOWN_USER);
+
+        if (isMemberGoneError) {
+            logInfo(`${logPrefix} Could not fetch partial member (likely already gone - Discord Error ${error.code}).`);
+            // Return the original partial member *only if* it contains the essential IDs for potential fallback logic
+            if (member.user && member.guild) {
+                logDebug(`${logPrefix} Returning original partial member data as fallback.`);
+                return member; // Return the original partial data
             } else {
-                // Log other errors (permissions, rate limits, network)
-                logError(`${logPrefix} Failed to fetch partial member data:`, error);
-                return null; // Cannot proceed reliably without full data
+                logWarn(`${logPrefix} Fetch failed (member gone), and original partial data lacks essential IDs. Cannot proceed.`);
+                return null; // Original partial is also unusable
             }
+        } else {
+            // Log other types of fetch errors (permissions, network, rate limits, etc.)
+            logError(`${logPrefix} Failed to fetch partial member data due to unexpected error:`, error);
+            return null; // Cannot proceed reliably after other errors
         }
     }
-    // Already full, ensure critical data exists
-    if (!member?.user || !member?.guild) {
-         logWarn(`[IntegrityCheck][Guild:${member.guild?.id ?? 'N/A'}][User:${member.id}] Provided member object missing critical user/guild data.`);
-         return null;
-     }
-    return member;
 }
+// --- END REFACTORED FUNCTION ---
+
 
 /**
  * Updates pending TrackedJoin records to 'left_early' for a user leaving the guild.
@@ -565,13 +586,15 @@ client.on(Events.InteractionCreate, async interaction => {
 client.on(Events.GuildMemberAdd, async member => {
     const logPrefixBase = `[GuildMemberAdd][Guild:${member.guild?.id ?? 'N/A'}][User:${member.id}]`;
     try {
-        // 1. Ensure Full Member Data (Handles partials)
-        const fullMember = await _ensureFullMemberData(member);
-        if (!fullMember) { // Also checks for missing user/guild internally
-            logWarn(`${logPrefixBase} Could not obtain full member data. Cannot process join.`);
+        // 1. Ensure Full Member Data (Handles partials, returns null if unusable)
+        const usableMember = await _ensureFullMemberData(member);
+        if (!usableMember) {
+            // Logging handled within _ensureFullMemberData
+            logWarn(`${logPrefixBase} Could not obtain usable member data. Cannot process join.`);
             return;
         }
-        const { guild, user } = fullMember; // Use guaranteed non-null guild/user from fullMember
+        // Use guaranteed non-null guild/user from the *potentially* refetched member object
+        const { guild, user } = usableMember;
         const logPrefix = `[GuildMemberAdd][Guild:${guild.id}][User:${user.id}]`; // Corrected prefix
         logInfo(`${logPrefix} User ${user.tag} joined.`);
 
@@ -593,8 +616,9 @@ client.on(Events.GuildMemberAdd, async member => {
         // 5. Ensure Invite Cache (Attempts to rebuild if missing)
         const cachedUses = await _ensureInviteCache(guild, logPrefix);
         if (!cachedUses) {
+            // Logging handled within _ensureInviteCache
             logWarn(`${logPrefix} Could not ensure invite cache. Skipping attribution.`);
-            return; // Error already logged by _ensureInviteCache
+            return;
         }
 
         // 6. Get Bot-Tracked Invites from DB
@@ -642,17 +666,20 @@ client.on(Events.GuildMemberAdd, async member => {
 client.on(Events.GuildMemberRemove, async member => {
     const logPrefixBase = `[GuildMemberRemove][Guild:${member.guild?.id ?? 'N/A'}][User:${member.id}]`;
     try {
-        // 1. Ensure Full Member Data (Handles partials)
-        const fullMember = await _ensureFullMemberData(member);
-         if (!fullMember) { // Also checks for missing user/guild internally
-             logWarn(`${logPrefixBase} Could not obtain full member data. Cannot process leave accurately.`);
-             // Attempt update with just IDs if available, though less ideal
+        // 1. Ensure Full Member Data (Handles partials, returns null if unusable)
+        const usableMember = await _ensureFullMemberData(member);
+         if (!usableMember) { // If null, essential data (guild.id, user.id) was missing or unrecoverable
+             // Logging handled within _ensureFullMemberData
+             logWarn(`${logPrefixBase} Could not obtain usable member data. Cannot accurately process leave.`);
+             // Attempt update with just IDs if available *from the original partial*, though less ideal
              if (member.guild?.id && member.id) {
+                 logWarn(`${logPrefixBase} Attempting leave update using only IDs from potentially incomplete member object.`);
                  await _markJoinsAsLeftEarly(member.guild.id, member.id, logPrefixBase);
              }
              return;
          }
-        const { guild, user } = fullMember; // Use guaranteed non-null guild/user
+        // Use guaranteed non-null guild/user from usableMember
+        const { guild, user } = usableMember;
         const logPrefix = `[GuildMemberRemove][Guild:${guild.id}][User:${user.id}]`; // Corrected prefix
         logInfo(`${logPrefix} User ${user.tag ?? user.id} left or was removed.`);
 
