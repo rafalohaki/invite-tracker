@@ -64,12 +64,12 @@ A Node.js/discord.js v14 bot to track user-generated invites, validate joins bas
     # --- Core Settings ---
     DISCORD_TOKEN=YOUR_BOT_TOKEN_HERE
     CLIENT_ID=YOUR_CLIENT_ID_HERE
-    MONGODB_URI=YOUR_MONGODB_CONNECTION_STRING_HERE
-    ADMIN_ID=YOUR_ADMIN_ID_HERE # Your Discord User ID for admin commands
+    MONGODB_URI=YOUR_MONGODB_CONNECTION_STRING_HERE # e.g., mongodb://user:pass@host:port/db
+    ADMIN_IDS=YOUR_ADMIN_ID_1,YOUR_ADMIN_ID_2 # Comma-separated Discord User IDs for admin commands (no spaces!)
 
     # --- Language Configuration ---
-    # Set to 'custom' to use translations from the 'custom:' section in custom-lang.yaml (falls back to 'en')
-    # Set to 'en' (or leave blank/comment out) to use only the default 'en:' section from custom-lang.yaml
+    # Set to 'custom' to use translations from the 'custom:' section in custom-lang.yaml (falls back to 'en' for missing keys).
+    # Set to 'en' (or leave blank/comment out) to use only the default 'en:' section from custom-lang.yaml.
     LOCALE_LANG=custom
 
     # --- Optional Settings ---
@@ -96,10 +96,10 @@ A Node.js/discord.js v14 bot to track user-generated invites, validate joins bas
 
 7.  **Deploy Slash Commands:**
     ```bash
-    npm run deploy # Uses the script defined in package.json
-    # Or alternatively: node deploy-commands.js
+    node deploy-commands.js
     ```
     *   **Global Deployment:** If `TEST_GUILD_ID` is *not* set in `.env`, commands deploy globally (updates can take up to 1 hour).
+    *   Make sure the bot has the `application.commands` scope when invited.
     *   **Test Guild Deployment:** If `TEST_GUILD_ID` *is* set in `.env`, commands deploy only to that specific guild (updates are near-instant). Recommended for development.
 
 8.  **Run the Bot:**
@@ -110,20 +110,20 @@ A Node.js/discord.js v14 bot to track user-generated invites, validate joins bas
 
 ## ⚙️ Configuration Summary
 
-*   **`.env`:** Contains sensitive credentials (Bot Token, DB URI), your Admin ID, the target language setting (`LOCALE_LANG`), deployment settings (Test Guild ID), and optional behavioral overrides (validation period, cleanup). **Keep Private!**
-*   **`custom-lang.yaml`:** Stores all user-facing text strings. Edit the `custom:` section for your own translations/phrasing. Requires `LOCALE_LANG=custom` in `.env` to be active. The `en:` section serves as the default and fallback.
+*   **`.env`:** Contains sensitive credentials (Bot Token, DB URI), your Admin ID(s) (`ADMIN_IDS`), the target language setting (`LOCALE_LANG`), deployment settings (Test Guild ID), and optional behavioral overrides (validation period, cleanup). **Keep Private!**
+*   **`custom-lang.yaml`:** Stores all user-facing text strings. Edit the `custom:` section for your own translations/phrasing. Requires `LOCALE_LANG=custom` in `.env` to be active (uses `en:` as fallback). If `LOCALE_LANG` is `en` or missing, only `en:` is used.
 *   **`config.js`:** Contains non-sensitive, general bot settings like embed colors and default limits/intervals that are less likely to change per deployment.
 
 ## 🎮 Usage
 
 *   `/invite`: Shows your personal invite link, your validated invite count (users who joined via your link and stayed > 1 week), and your pending invite count (users who joined but haven't stayed 1 week yet). Automatically generates a new link if needed.
 *   `/leaderboard`: Displays a ranked list of users based on their *validated* invite count.
-*   `/check <user>`: **[Admin Only]** Displays the invite link, validated count, and pending count for the specified user. Requires your Discord ID to be correctly set as `ADMIN_ID` in the `.env` file.
+*   `/check <user>`: **[Admin Only]** Displays the invite link, validated count, and pending count for the specified user. Requires your Discord ID to be listed in `ADMIN_IDS` in the `.env` file.
 
 ## 💡 Deployment Notes
 
-*   Run `npm run deploy` (or `node deploy-commands.js`) whenever you add or modify the *structure* (name, options, description) of slash commands defined in the `/commands` directory.
-*   Use `TEST_GUILD_ID` in `.env` for faster development and testing. Remove or comment it out for global production deployment.
+*   Run `node deploy-commands.js` whenever you add or modify the *structure* (name, options, description) of slash commands defined in the `/commands` directory.
+*   Use `TEST_GUILD_ID` in `.env` for faster development and testing command updates. Remove or comment it out for global production deployment.
 *   Set `LOCALE_LANG` in `.env` to `en` or `custom` to control which language strings are used from `custom-lang.yaml`.
 
 ## 🤝 Contributing
