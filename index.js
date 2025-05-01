@@ -4,6 +4,9 @@
  * Initializes the Discord client, connects to the database, loads commands,
  * handles events (ready, interactions, member joins/leaves), manages invite caching,
  * runs the periodic join validation task, and supports custom translations.
+ * ---
+ * Includes basic logging levels (DEBUG, INFO, WARN, ERROR) controlled by LOG_LEVEL env var.
+ * Includes detection and warning for potential invite attribution ambiguity in rapid join scenarios.
  */
 
 // Load environment variables from .env file early
@@ -21,37 +24,49 @@ const { loadTranslations, t } = require('./utils/translator');
 // --- Load Translations ---
 loadTranslations();
 
+// --- Logging Setup ---
+const LOG_LEVELS = { DEBUG: 1, INFO: 2, WARN: 3, ERROR: 4 };
+const configuredLogLevelName = process.env.LOG_LEVEL?.toUpperCase() || 'INFO';
+const LOG_LEVEL = LOG_LEVELS[configuredLogLevelName] || LOG_LEVELS.INFO;
+
+const logDebug = (...args) => { if (LOG_LEVEL <= LOG_LEVELS.DEBUG) console.debug('[DEBUG]', ...args); };
+const logInfo = (...args) => { if (LOG_LEVEL <= LOG_LEVELS.INFO) console.info('[INFO]', ...args); };
+const logWarn = (...args) => { if (LOG_LEVEL <= LOG_LEVELS.WARN) console.warn('[WARN]', ...args); };
+const logError = (...args) => { if (LOG_LEVEL <= LOG_LEVELS.ERROR) console.error('[ERROR]', ...args); };
+
 // --- Configuration & Constants ---
-const validationPeriodDays = parseInt(process.env.VALIDATION_PERIOD_DAYS || config.defaultValidationPeriodDays || 7, 10);
-const VALIDATION_PERIOD_MS = validationPeriodDays * 24 * 60 * 60 * 1000;
-const validationCheckIntervalMinutes = parseInt(process.env.VALIDATION_CHECK_INTERVAL_MINUTES || config.defaultValidationCheckIntervalMinutes || 60, 10);
-const VALIDATION_CHECK_INTERVAL_MS = validationCheckIntervalMinutes * 60 * 1000;
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const MONGODB_URI = process.env.MONGODB_URI;
 const PERFORM_GUILD_DELETE_CLEANUP = process.env.PERFORM_GUILD_DELETE_CLEANUP === 'true';
+
+const validationPeriodDays = parseInt(process.env.VALIDATION_PERIOD_DAYS || config.defaultValidationPeriodDays || 7, 10);
+const VALIDATION_PERIOD_MS = validationPeriodDays * 24 * 60 * 60 * 1000;
+const validationCheckIntervalMinutes = parseInt(process.env.VALIDATION_CHECK_INTERVAL_MINUTES || config.defaultValidationCheckIntervalMinutes || 60, 10);
+const VALIDATION_CHECK_INTERVAL_MS = validationCheckIntervalMinutes * 60 * 1000;
 
 const DISCORD_ERROR_CODES = {
     UNKNOWN_INVITE: 10006,
     UNKNOWN_MEMBER: 10007,
     UNKNOWN_USER: 10013,
     MISSING_PERMISSIONS: 50013,
-    TOKEN_INVALID: 'TokenInvalid',
+    TOKEN_INVALID: 'TokenInvalid', // Used by older d.js or sometimes in error messages
 };
 
 // --- Critical Environment Variable Checks ---
 if (!TOKEN || !CLIENT_ID || !MONGODB_URI) {
-    console.error("FATAL ERROR: DISCORD_TOKEN, CLIENT_ID, or MONGODB_URI is missing in the .env file.");
+    logError("FATAL ERROR: DISCORD_TOKEN, CLIENT_ID, or MONGODB_URI is missing in the .env file.");
     process.exit(1);
 }
 
-console.log(`[Config] Validation Period: ${validationPeriodDays} days (${VALIDATION_PERIOD_MS}ms)`);
-console.log(`[Config] Validation Check Interval: ${validationCheckIntervalMinutes} minutes (${VALIDATION_CHECK_INTERVAL_MS}ms)`);
-console.log(`[Config] Locale setting (LOCALE_LANG): ${process.env.LOCALE_LANG || 'en (default)'}`);
-console.log(`[Config] Guild delete cleanup: ${PERFORM_GUILD_DELETE_CLEANUP}`);
+logInfo(`[Config] Log Level: ${configuredLogLevelName} (${LOG_LEVEL})`);
+logInfo(`[Config] Validation Period: ${validationPeriodDays} days (${VALIDATION_PERIOD_MS}ms)`);
+logInfo(`[Config] Validation Check Interval: ${validationCheckIntervalMinutes} minutes (${VALIDATION_CHECK_INTERVAL_MS}ms)`);
+logInfo(`[Config] Locale setting (LOCALE_LANG): ${process.env.LOCALE_LANG || 'en (default)'}`);
+logInfo(`[Config] Guild delete cleanup: ${PERFORM_GUILD_DELETE_CLEANUP}`);
 
 // --- Database Connection ---
-connectDB();
+connectDB(); // Handles its own logging and exit on failure
 
 // --- Discord Client Initialization ---
 const client = new Client({
@@ -64,10 +79,10 @@ const client = new Client({
 });
 
 // --- Translator & Command Setup ---
-client.t = t;
+client.t = t; // Attach translator function to client
 client.commands = new Collection();
 const commandsPath = path.join(__dirname, 'commands');
-_loadCommands(client, commandsPath); // Use helper
+_loadCommands(client, commandsPath); // Use helper to load commands
 
 // --- Invite Cache ---
 // Structure: Map<GuildID, Map<InviteCode, UsesCount>>
@@ -77,27 +92,31 @@ const inviteUsesCache = new Map();
 
 /** Loads slash commands from the specified directory into the client. */
 function _loadCommands(clientInstance, directoryPath) {
-    console.log('[CommandLoader] Loading command files...');
+    logInfo('[CommandLoader] Loading command files...');
     let loadedCount = 0;
     try {
         const commandFiles = fs.readdirSync(directoryPath).filter(file => file.endsWith('.js'));
         for (const file of commandFiles) {
             const filePath = path.join(directoryPath, file);
             try {
+                // Bust cache to ensure updates are loaded on restart during development
+                delete require.cache[require.resolve(filePath)];
                 const command = require(filePath);
+
                 if ('data' in command && 'execute' in command) {
                     clientInstance.commands.set(command.data.name, command);
+                    logDebug(`[CommandLoader] Loaded command: ${command.data.name}`);
                     loadedCount++;
                 } else {
-                    console.warn(`[CommandLoader] WARNING: Command file ${filePath} is missing required 'data' or 'execute'.`);
+                    logWarn(`[CommandLoader] Command file ${filePath} is missing required 'data' or 'execute'.`);
                 }
             } catch (error) {
-                console.error(`[CommandLoader] ERROR: Failed to load command file ${file}:`, error);
+                logError(`[CommandLoader] Failed to load command file ${file}:`, error);
             }
         }
-        console.log(`[CommandLoader] Successfully loaded ${loadedCount} command(s).`);
+        logInfo(`[CommandLoader] Successfully loaded ${loadedCount} command(s).`);
     } catch (error) {
-        console.error("[CommandLoader] ERROR: Failed to read commands directory:", error);
+        logError("[CommandLoader] Failed to read commands directory:", error);
     }
 }
 
@@ -105,18 +124,22 @@ function _loadCommands(clientInstance, directoryPath) {
  * Checks bot permissions necessary for invite tracking.
  * @param {import('discord.js').Guild} guild - The guild to check permissions in.
  * @param {string} logPrefix - Prefix for logging.
- * @returns {boolean} True if permissions are sufficient, false otherwise.
+ * @returns {boolean} True if permissions are sufficient, false otherwise. Logs warnings internally.
  */
 function _hasRequiredPermissions(guild, logPrefix) {
-    // Ensure guild.members.me is available
     if (!guild.members.me) {
-        console.warn(`${logPrefix} Bot member object (guild.members.me) is unavailable. Cannot check permissions.`);
+        logWarn(`${logPrefix} Bot member object (guild.members.me) is unavailable. Cannot check permissions.`);
         return false;
     }
+    // Manage Guild is required to fetch invites reliably
     if (!guild.members.me.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
-        console.warn(`${logPrefix} Missing 'Manage Guild' permission. Cannot cache or reliably track invites.`);
+        logWarn(`${logPrefix} Missing 'Manage Guild' permission. Cannot cache or reliably track invites.`);
         return false;
     }
+    // View Audit Log could potentially be used for more robust tracking, but not strictly required for count-based method
+    // if (!guild.members.me.permissions.has(PermissionsBitField.Flags.ViewAuditLog)) {
+    //    logWarn(`${logPrefix} Missing 'View Audit Log' permission. Cannot use audit logs for enhanced tracking.`);
+    // }
     return true;
 }
 
@@ -139,13 +162,13 @@ async function cacheGuildInvites(guild) {
         const usesMap = new Map();
         invites.forEach(invite => usesMap.set(invite.code, invite.uses ?? 0));
         inviteUsesCache.set(guild.id, usesMap);
-        // console.log(`${logPrefix} Cached ${usesMap.size} invite uses.`); // Less verbose
+        logDebug(`${logPrefix} Cached ${usesMap.size} invite uses.`);
         return true;
     } catch (error) {
         if (error instanceof DiscordAPIError && error.code === DISCORD_ERROR_CODES.MISSING_PERMISSIONS) {
-            console.warn(`${logPrefix} Missing 'Manage Guild' permissions while trying to fetch invites.`);
+            logWarn(`${logPrefix} Missing 'Manage Guild' permissions while trying to fetch invites for caching.`);
         } else {
-            console.error(`${logPrefix} Error caching invites:`, error);
+            logError(`${logPrefix} Error caching invites:`, error);
         }
         inviteUsesCache.delete(guild.id); // Clear potentially bad cache on error
         return false;
@@ -153,57 +176,62 @@ async function cacheGuildInvites(guild) {
 }
 
 /**
- * Safely fetches current invites for a guild.
+ * Safely fetches current invites for a guild. Checks permissions first.
  * @param {import('discord.js').Guild} guild - The guild object.
  * @param {string} logPrefix - Prefix for logging.
- * @returns {Promise<Collection<string, import('discord.js').Invite>|null>} Invite collection or null on error.
+ * @returns {Promise<Collection<string, import('discord.js').Invite>|null>} Invite collection or null on error/permission issue.
  */
 async function _fetchGuildInvitesSafe(guild, logPrefix) {
+    if (!_hasRequiredPermissions(guild, logPrefix)) {
+        // Warning already logged by _hasRequiredPermissions
+        return null;
+    }
     try {
-        // Before fetching, ensure we still have permissions
-        if (!_hasRequiredPermissions(guild, logPrefix)) return null;
         return await guild.invites.fetch();
     } catch (error) {
          if (error instanceof DiscordAPIError && error.code === DISCORD_ERROR_CODES.MISSING_PERMISSIONS) {
-            console.warn(`${logPrefix} Missing 'Manage Guild' permissions while trying to fetch invites.`);
+            // This shouldn't happen if _hasRequiredPermissions passed, but check defensively
+            logWarn(`${logPrefix} Missing 'Manage Guild' permissions during fetch (unexpected after check).`);
         } else {
-            console.error(`${logPrefix} Error fetching invites (needed for attribution):`, error);
+            logError(`${logPrefix} Error fetching invites (needed for attribution):`, error);
         }
         return null;
     }
 }
 
 /**
- * Ensures the invite cache for a guild is populated.
+ * Ensures the invite cache for a guild is populated. Attempts to cache if missing.
  * @param {import('discord.js').Guild} guild - The guild object.
  * @param {string} logPrefix - Prefix for logging.
- * @returns {Promise<Map<string, number>|null>} The uses map from cache, or null if failed.
+ * @returns {Promise<Map<string, number>|null>} The uses map from cache, or null if cache cannot be established.
  */
 async function _ensureInviteCache(guild, logPrefix) {
     let cachedUses = inviteUsesCache.get(guild.id);
     if (!cachedUses) {
-        console.warn(`${logPrefix} Invite cache missing. Attempting to cache now...`);
+        logWarn(`${logPrefix} Invite cache missing. Attempting to cache now...`);
         const cacheSuccess = await cacheGuildInvites(guild);
         cachedUses = inviteUsesCache.get(guild.id); // Re-fetch after attempting cache
         if (!cacheSuccess || !cachedUses) {
-            console.error(`${logPrefix} Failed to establish invite cache; cannot reliably attribute join.`);
+            logError(`${logPrefix} Failed to establish invite cache; cannot reliably attribute join.`);
             return null;
         }
+        logInfo(`${logPrefix} Successfully repopulated invite cache.`);
     }
     return cachedUses;
 }
 
 /**
- * Fetches UserInvite documents relevant to the bot for a specific guild.
+ * Fetches UserInvite documents (invites generated by the bot) for a specific guild.
  * @param {string} guildId - The guild ID.
  * @param {string} logPrefix - Prefix for logging.
- * @returns {Promise<Array<object>|null>} Array of lean UserInvite objects or null on error.
+ * @returns {Promise<Array<object>|null>} Array of lean UserInvite objects or null on database error.
  */
 async function _getTrackedUserInvites(guildId, logPrefix) {
     try {
+        // Fetch lean for performance as we only read data
         return await UserInvite.find({ guildId }).lean();
     } catch (dbError) {
-        console.error(`${logPrefix} Database error fetching UserInvites:`, dbError);
+        logError(`${logPrefix} Database error fetching UserInvites:`, dbError);
         return null;
     }
 }
@@ -214,39 +242,44 @@ async function _getTrackedUserInvites(guildId, logPrefix) {
  * @param {Collection<string, import('discord.js').Invite>|null} currentInvites - Freshly fetched invites.
  * @param {Map<string, number>|null} cachedUses - Previously cached uses map.
  * @param {string} logPrefix - Prefix for logging.
- * @returns {{ isStale: boolean, usageIncreased: boolean }} - Result of the check.
+ * @returns {{ isStale: boolean, usageIncreased: boolean, delta: number, inviterId: string, inviteCode: string }} - Result of the check.
  */
 function _checkSingleInvite(userInvite, currentInvites, cachedUses, logPrefix) {
     const currentInvite = currentInvites?.get(userInvite.inviteCode);
     const cachedUseCount = cachedUses?.get(userInvite.inviteCode);
     let usageIncreased = false;
+    let delta = 0;
 
     if (!currentInvite) {
-        // Invite deleted on Discord
-        console.warn(`${logPrefix} Tracked invite code ${userInvite.inviteCode} (Inviter: ${userInvite.userId}) not found on Discord. Marking for DB deletion.`);
+        // Invite deleted on Discord or inaccessible
+        logWarn(`${logPrefix} Tracked invite code ${userInvite.inviteCode} (Inviter: ${userInvite.userId}) not found on Discord. Marking as stale.`);
         cachedUses?.delete(userInvite.inviteCode); // Clean from live cache map immediately
-        return { isStale: true, usageIncreased: false };
+        return { isStale: true, usageIncreased: false, delta: 0, inviterId: userInvite.userId, inviteCode: userInvite.inviteCode };
     }
 
     // Invite exists, check usage
     const currentUses = currentInvite.uses ?? 0;
-    if (cachedUses && cachedUseCount !== undefined && currentUses > cachedUseCount) {
-        // Standard case: Cache exists and usage increased
-        console.log(`${logPrefix} Potential attribution: Code ${userInvite.inviteCode} (Inviter: ${userInvite.userId}) uses increased from ${cachedUseCount} to ${currentUses}.`);
-        usageIncreased = true;
-    } else if ((!cachedUses || cachedUseCount === undefined) && currentUses > 0) {
+    if (cachedUses && cachedUseCount !== undefined) {
+        if (currentUses > cachedUseCount) {
+             delta = currentUses - cachedUseCount;
+             logDebug(`${logPrefix} Code ${userInvite.inviteCode} (Inviter: ${userInvite.userId}) uses increased from ${cachedUseCount} to ${currentUses} (Delta: ${delta}).`);
+             usageIncreased = true;
+        }
+        // else: uses same or decreased (less likely, but possible if invite reset/deleted+recreated?)
+    } else if (currentUses > 0) {
         // Fallback case: Cache or specific code was missing, attribute if uses > 0
-        console.log(`${logPrefix} Note: Cache missing/incomplete for code ${userInvite.inviteCode}. Attributing based on current uses > 0 (${currentUses}).`);
+        logInfo(`${logPrefix} Cache missing/incomplete for code ${userInvite.inviteCode}. Attributing based on current uses > 0 (${currentUses}). Delta assumed ${currentUses}.`);
+        delta = currentUses; // Assume all current uses are new since cache miss
         usageIncreased = true;
     }
+    // else: Cache missing and current uses is 0, no increase.
 
-    return { isStale: false, usageIncreased: usageIncreased };
+    return { isStale: false, usageIncreased, delta, inviterId: userInvite.userId, inviteCode: userInvite.inviteCode };
 }
-
 
 /**
  * Compares current invite uses with cached uses to find the used invite and identify stale ones.
- * Refactored to use _checkSingleInvite. Complexity reduced.
+ * Logs a warning if multiple invites show increased usage (attribution ambiguity).
  * @param {Collection<string, import('discord.js').Invite>|null} currentInvites - Freshly fetched invites.
  * @param {Map<string, number>|null} cachedUses - Previously cached uses map.
  * @param {Array<object>} trackedUserInvites - UserInvites from the database.
@@ -255,40 +288,53 @@ function _checkSingleInvite(userInvite, currentInvites, cachedUses, logPrefix) {
  */
 function _findUsedInviteAndStale(currentInvites, cachedUses, trackedUserInvites, logPrefix) {
     let attribution = null;
-    const staleInviteIds = []; // Store IDs (_id from lean object) of invites to delete from DB
-    let anyUsageIncreased = false; // Track if *any* invite saw an increase
+    const staleInviteIds = []; // Store DB IDs (_id) of invites to delete
+    const potentialAttributions = []; // Store invites with increased usage
 
     if (!currentInvites) {
-        console.warn(`${logPrefix} Cannot compare invites: currentInvites collection is null.`);
-        // Mark all tracked invites as potentially stale if we can't verify? Or just return empty?
-        // Safest is to do nothing and let next join/cache attempt sort it out.
+        logWarn(`${logPrefix} Cannot compare invites: currentInvites collection is null (likely permissions issue or API error).`);
+        // Cannot determine stale invites reliably without current state. Attribution impossible.
         return { attribution: null, staleInviteIds: [] };
     }
+    if (!cachedUses) {
+        logWarn(`${logPrefix} Cannot compare invites: cachedUses map is null (cache failed?).`);
+        // Cannot reliably determine usage increase. Attribution impossible.
+        return { attribution: null, staleInviteIds: [] };
+    }
+
 
     for (const userInvite of trackedUserInvites) {
         const checkResult = _checkSingleInvite(userInvite, currentInvites, cachedUses, logPrefix);
 
         if (checkResult.isStale) {
             staleInviteIds.push(userInvite._id.toString()); // Store the DB document ID
-        }
-
-        if (checkResult.usageIncreased) {
-            anyUsageIncreased = true;
-            // Only attribute the *first* invite found with increased usage
-            if (!attribution) {
-                attribution = { inviterId: userInvite.userId, inviteCode: userInvite.inviteCode };
-            }
+        } else if (checkResult.usageIncreased) {
+            potentialAttributions.push({
+                inviterId: checkResult.inviterId,
+                inviteCode: checkResult.inviteCode,
+                delta: checkResult.delta // Store the delta for potential future logic
+            });
         }
     }
 
-     // Log if uses increased overall, but not for the invite we ended up attributing (or if none was attributed)
-     if (anyUsageIncreased && !attribution) {
-         console.log(`${logPrefix} Invite use counts increased, but couldn't attribute to a *specific* known user invite. Maybe a non-tracked invite was used?`);
-     } else if (anyUsageIncreased && attribution) {
-        // This just confirms attribution happened when an increase was detected. Debug log mostly.
-        // console.log(`${logPrefix} Attributed join based on usage increase for ${attribution.inviteCode}.`);
-     }
-
+    // --- Attribution Logic ---
+    if (potentialAttributions.length === 1) {
+        // Single invite increased usage - clear case
+        attribution = potentialAttributions[0];
+        logInfo(`${logPrefix} Attributed join to User ${attribution.inviterId} via code ${attribution.inviteCode} (Usage increased by ${attribution.delta}).`);
+    } else if (potentialAttributions.length > 1) {
+        // Multiple invites increased usage - ambiguous case
+        attribution = potentialAttributions[0]; // Default to attributing the first one found
+        const ambiguousCodes = potentialAttributions.map(p => `${p.inviteCode} (+${p.delta})`).join(', ');
+        logWarn(`${logPrefix} Attribution Ambiguity Detected! Multiple tracked invites increased usage: [${ambiguousCodes}]. Attributing to the first found (${attribution.inviteCode}), but accuracy is not guaranteed in rapid join scenarios.`);
+    } else {
+         // No tracked invite showed increased usage
+         logInfo(`${logPrefix} No specific tracked invite usage increase detected.`);
+         // Consider checking if *any* invite (even non-tracked) increased, though less useful
+         // let totalCurrentUses = 0; currentInvites.forEach(inv => totalCurrentUses += (inv.uses ?? 0));
+         // let totalCachedUses = 0; cachedUses.forEach(uses => totalCachedUses += uses);
+         // if (totalCurrentUses > totalCachedUses) { logInfo(`${logPrefix} Note: Overall invite usage increased, but not matched to a tracked invite.` }
+    }
 
     return { attribution, staleInviteIds };
 }
@@ -296,21 +342,25 @@ function _findUsedInviteAndStale(currentInvites, cachedUses, trackedUserInvites,
 /**
  * Deletes stale UserInvite records from the database.
  * @param {string[]} staleInviteIds - Array of UserInvite document IDs (_id) to delete.
- * @param {string} guildId - The guild ID.
+ * @param {string} guildId - The guild ID for context.
  * @param {string} logPrefix - Prefix for logging.
  */
 async function _cleanupStaleInvites(staleInviteIds, guildId, logPrefix) {
     if (staleInviteIds.length === 0) return;
+    logInfo(`${logPrefix} Cleaning up ${staleInviteIds.length} stale UserInvite record(s) from DB...`);
     try {
-        const result = await UserInvite.deleteMany({ _id: { $in: staleInviteIds }, guildId }); // Ensure guildId match for safety
-        console.log(`${logPrefix} Deleted ${result.deletedCount} stale UserInvite record(s) from DB.`);
+        const result = await UserInvite.deleteMany({
+            _id: { $in: staleInviteIds.map(id => new mongoose.Types.ObjectId(id)) }, // Ensure IDs are ObjectIds if needed
+            guildId: guildId // Ensure guildId match for safety
+        });
+        logInfo(`${logPrefix} Deleted ${result.deletedCount} stale UserInvite record(s).`);
     } catch (dbDelErr) {
-        console.error(`${logPrefix} Failed to delete stale UserInvite records:`, dbDelErr);
+        logError(`${logPrefix} Failed to delete stale UserInvite records:`, dbDelErr);
     }
 }
 
 /**
- * Creates or updates a TrackedJoin record for a new member.
+ * Creates or updates a TrackedJoin record for a new member. Sets status to 'pending'.
  * @param {string} guildId - Guild ID.
  * @param {string} inviteeId - User ID of the new member.
  * @param {string} inviterId - User ID of the attributed inviter.
@@ -319,284 +369,339 @@ async function _cleanupStaleInvites(staleInviteIds, guildId, logPrefix) {
  */
 async function _createOrUpdatePendingJoin(guildId, inviteeId, inviterId, inviteCode, logPrefix) {
     try {
-        await TrackedJoin.findOneAndUpdate(
-            // Find existing pending joins for this user in this guild.
-            { guildId, inviteeId, status: 'pending' },
-            // Set inviter, code, timestamp, and ensure status is pending.
-            // If upserting, ensure guildId and inviteeId are set.
-            {
-                $set: {
-                    inviterId,
-                    inviteCodeUsed: inviteCode,
-                    joinTimestamp: new Date(),
-                    status: 'pending' // Explicitly set status on update/insert
+        const joinTime = new Date();
+        // Upsert: Find by guild+invitee. If found, update inviter/code/time. If not, insert new.
+        // Crucially sets status to 'pending' always.
+        const result = await TrackedJoin.findOneAndUpdate(
+             { guildId, inviteeId }, // Find existing join record for this user in this guild
+             {
+                 $set: {
+                     inviterId,
+                     inviteCodeUsed: inviteCode,
+                     joinTimestamp: joinTime,
+                     status: 'pending', // Ensure status is pending
+                     // Clear validation/leave timestamps if rejoining/re-attributed
+                     validationTimestamp: undefined,
+                     leaveTimestamp: undefined,
                  },
-                 $setOnInsert: { guildId, inviteeId }
+                 $setOnInsert: { guildId, inviteeId } // Set these only if inserting new doc
              },
-             { upsert: true, new: true, setDefaultsOnInsert: true }
+             { upsert: true, new: true, setDefaultsOnInsert: true } // Upsert=create if not found, new=return updated doc
         );
-        console.log(`${logPrefix} Successfully created/updated TrackedJoin record.`);
+        logInfo(`${logPrefix} Successfully created/updated TrackedJoin record (ID: ${result._id}, Status: ${result.status}).`);
     } catch (dbError) {
-        console.error(`${logPrefix} Failed to create/update TrackedJoin record:`, dbError);
+        logError(`${logPrefix} Failed to create/update TrackedJoin record:`, dbError);
     }
 }
 
 /**
  * Ensures member object is not partial. Fetches if necessary.
  * @param {import('discord.js').GuildMember | import('discord.js').PartialGuildMember} member - The member object.
- * @returns {Promise<import('discord.js').GuildMember | null>} Full member object or null if fetch fails critically.
+ * @returns {Promise<import('discord.js').GuildMember | null>} Full member object or null if fetch fails critically or essential data missing.
  */
 async function _ensureFullMemberData(member) {
     if (member.partial) {
         const logPrefix = `[PartialFetch][Guild:${member.guild?.id ?? 'N/A'}][User:${member.id}]`;
-        console.log(`${logPrefix} Member data is partial. Fetching...`);
+        logDebug(`${logPrefix} Member data is partial. Fetching...`);
         try {
-            return await member.fetch();
+            const fullMember = await member.fetch();
+            if (!fullMember?.user || !fullMember?.guild) {
+                 logWarn(`${logPrefix} Fetched member but critical user/guild data still missing.`);
+                 return null;
+             }
+            return fullMember;
         } catch (error) {
             if (error instanceof DiscordAPIError && (error.code === DISCORD_ERROR_CODES.UNKNOWN_MEMBER || error.code === DISCORD_ERROR_CODES.UNKNOWN_USER)) {
-                console.log(`${logPrefix} Could not fully fetch partial member (likely already gone). Proceeding with available data.`);
-                // Return the partially-fetched member if critical IDs are still present
+                logInfo(`${logPrefix} Could not fully fetch partial member (likely already gone). Proceeding with available partial data if possible.`);
+                // Return the partially-fetched member only if critical IDs are still present
                 return (member.user && member.guild) ? member : null;
             } else {
-                console.error(`${logPrefix} Failed to fetch partial member:`, error);
-                return null; // Cannot proceed reliably
+                // Log other errors (permissions, rate limits, network)
+                logError(`${logPrefix} Failed to fetch partial member data:`, error);
+                return null; // Cannot proceed reliably without full data
             }
         }
     }
-    return member; // Already full
+    // Already full, ensure critical data exists
+    if (!member?.user || !member?.guild) {
+         logWarn(`[IntegrityCheck][Guild:${member.guild?.id ?? 'N/A'}][User:${member.id}] Provided member object missing critical user/guild data.`);
+         return null;
+     }
+    return member;
 }
 
 /**
- * Updates pending TrackedJoin records to 'left_early' for a user.
+ * Updates pending TrackedJoin records to 'left_early' for a user leaving the guild.
  * @param {string} guildId - The guild ID.
- * @param {string} userId - The user ID.
+ * @param {string} userId - The user ID who left.
  * @param {string} logPrefix - Prefix for logging.
  */
 async function _markJoinsAsLeftEarly(guildId, userId, logPrefix) {
     try {
+        const leaveTime = new Date();
+        // Update only 'pending' joins for this user to 'left_early'
         const result = await TrackedJoin.updateMany(
             { guildId, inviteeId: userId, status: 'pending' },
-            { $set: { status: 'left_early', leaveTimestamp: new Date() } }
+            { $set: { status: 'left_early', leaveTimestamp: leaveTime } }
         );
         if (result.modifiedCount > 0) {
-            console.log(`${logPrefix} Updated ${result.modifiedCount} pending join record(s) to 'left_early'.`);
+            logInfo(`${logPrefix} Updated ${result.modifiedCount} pending join record(s) to 'left_early'.`);
+        } else {
+            logDebug(`${logPrefix} No pending join records found for this user to mark as left_early.`);
         }
-        // else { console.log(`${logPrefix} No pending join record found for this user.`); } // Less verbose
     } catch (error) {
-        console.error(`${logPrefix} Error updating join status on leave:`, error);
+        logError(`${logPrefix} Error updating join status on leave:`, error);
     }
 }
 
 /**
- * Performs database cleanup when the bot leaves a guild, if enabled.
+ * Performs database cleanup (TrackedJoin, UserInvite) when the bot leaves a guild, if enabled via .env.
  * @param {string} guildId - The ID of the guild left.
  */
 async function _performGuildCleanup(guildId) {
     if (!PERFORM_GUILD_DELETE_CLEANUP) {
-        console.log(`[GuildDelete] Database cleanup for guild ${guildId} is disabled.`);
+        logInfo(`[GuildDelete] Database cleanup for guild ${guildId} is disabled by configuration.`);
         return;
     }
-    console.log(`[GuildDelete] Initiating database cleanup for guild ${guildId}...`);
+    logInfo(`[GuildDelete] Initiating database cleanup for guild ${guildId}...`);
     try {
         const trackedResult = await TrackedJoin.deleteMany({ guildId });
-        console.log(`[GuildDelete][Cleanup] Deleted ${trackedResult.deletedCount} TrackedJoin records for guild ${guildId}.`);
+        logInfo(`[GuildDelete][Cleanup] Deleted ${trackedResult.deletedCount} TrackedJoin records for guild ${guildId}.`);
     } catch (e) {
-        console.error(`[GuildDelete][Cleanup] Failed to cleanup TrackedJoins for guild ${guildId}:`, e);
+        logError(`[GuildDelete][Cleanup] Failed to cleanup TrackedJoins for guild ${guildId}:`, e);
     }
     try {
         const userInviteResult = await UserInvite.deleteMany({ guildId });
-        console.log(`[GuildDelete][Cleanup] Deleted ${userInviteResult.deletedCount} UserInvite records for guild ${guildId}.`);
+        logInfo(`[GuildDelete][Cleanup] Deleted ${userInviteResult.deletedCount} UserInvite records for guild ${guildId}.`);
     } catch (e) {
-        console.error(`[GuildDelete][Cleanup] Failed to cleanup UserInvites for guild ${guildId}:`, e);
+        logError(`[GuildDelete][Cleanup] Failed to cleanup UserInvites for guild ${guildId}:`, e);
     }
 }
-
 
 // --- Bot Event Handlers ---
 
 client.once(Events.ClientReady, async readyClient => {
-    console.log(`Logged in as ${readyClient.user.tag} (ID: ${readyClient.user.id})`);
-    console.log(`Operating in ${readyClient.guilds.cache.size} guild(s).`);
-
     try {
-        const activityText = client.t('general.activity_text');
-        readyClient.user.setActivity(activityText, { type: ActivityType.Listening });
-    } catch (activityError) {
-        console.error("Error setting bot activity:", activityError);
-        readyClient.user.setActivity('Tracking Invites'); // Fallback
-    }
+        logInfo(`Logged in as ${readyClient.user.tag} (ID: ${readyClient.user.id})`);
+        logInfo(`Operating in ${readyClient.guilds.cache.size} guild(s).`);
 
-    // Initial Invite Caching
-    console.log('[Ready] Starting initial invite caching...');
-    let cachedGuilds = 0, failedGuilds = 0;
-    const guilds = Array.from(readyClient.guilds.cache.values());
-    for (const guild of guilds) {
-        if (await cacheGuildInvites(guild)) cachedGuilds++; else failedGuilds++;
-        await new Promise(resolve => setTimeout(resolve, 300)); // Rate limit delay
-    }
-    console.log(`[Ready] Initial invite caching complete. Success: ${cachedGuilds}, Failed/No Perms: ${failedGuilds}`);
+        try {
+            const activityText = client.t('general.activity_text');
+            readyClient.user.setActivity(activityText, { type: ActivityType.Listening });
+            logInfo(`Set activity to: "${activityText}"`);
+        } catch (activityError) {
+            logError("Error setting bot activity:", activityError);
+            readyClient.user.setActivity('Tracking Invites', { type: ActivityType.Listening }); // Fallback
+        }
 
-    // Start Periodic Validation Task
-    console.log(`[ValidationTask] Starting validation check every ${validationCheckIntervalMinutes} minutes.`);
-    setInterval(validatePendingJoins, VALIDATION_CHECK_INTERVAL_MS);
-    // Run initial check slightly delayed after startup caching
-    setTimeout(() => {
-        console.log('[ValidationTask] Running initial validation check post-startup.');
-        validatePendingJoins();
-    }, 2 * 60 * 1000); // 2 min delay
+        // Initial Invite Caching
+        logInfo('[Ready] Starting initial invite caching for all guilds...');
+        let cachedGuilds = 0, failedGuilds = 0;
+        const guilds = Array.from(readyClient.guilds.cache.values());
+        for (const guild of guilds) {
+            logDebug(`[Ready] Caching invites for guild: ${guild.name} (${guild.id})`);
+            if (await cacheGuildInvites(guild)) cachedGuilds++; else failedGuilds++;
+            await new Promise(resolve => setTimeout(resolve, 300)); // Small delay between guilds
+        }
+        logInfo(`[Ready] Initial invite caching complete. Success: ${cachedGuilds}, Failed/No Perms: ${failedGuilds}`);
+
+        // Start Periodic Validation Task
+        logInfo(`[ValidationTask] Starting validation check every ${validationCheckIntervalMinutes} minutes.`);
+        setInterval(validatePendingJoins, VALIDATION_CHECK_INTERVAL_MS);
+
+        // Run initial check slightly delayed after startup caching
+        const initialCheckDelay = 2 * 60 * 1000; // 2 min delay
+        logInfo(`[ValidationTask] Scheduling initial validation check in ${initialCheckDelay / 1000} seconds.`);
+        setTimeout(() => {
+            logInfo('[ValidationTask] Running initial validation check post-startup.');
+            validatePendingJoins();
+        }, initialCheckDelay);
+
+    } catch (error) {
+        logError('[ClientReady] Critical error during initialization:', error);
+        // Depending on the error, might need to exit
+        // process.exit(1);
+    }
 });
 
 client.on(Events.InteractionCreate, async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
     const command = interaction.client.commands.get(interaction.commandName);
-    const logPrefix = `[Interaction][Cmd:${interaction.commandName}][User:${interaction.user.id}][Guild:${interaction.guildId ?? 'N/A'}]`; // Handle DM interaction possibility
+    const logPrefix = `[Interaction][Cmd:${interaction.commandName}][User:${interaction.user.id}][Guild:${interaction.guildId ?? 'N/A'}]`;
 
     if (!command) {
-        console.error(`${logPrefix} No command matching '${interaction.commandName}' was found.`);
+        logError(`${logPrefix} No command matching '${interaction.commandName}' was found.`);
         try {
+            // Use the translator attached to the client
             await interaction.reply({ content: interaction.client.t('general.error_unknown_command'), ephemeral: true });
         } catch (replyError) {
-            console.error(`${logPrefix} Failed to reply to unknown command interaction:`, replyError);
+            // Log error if replying itself fails
+            logError(`${logPrefix} Failed to reply to unknown command interaction:`, replyError);
         }
         return;
     }
 
     try {
-        // Pass the translator function to the command context if needed (though commands access it via client.t)
-        // await command.execute(interaction, interaction.client.t);
-        await command.execute(interaction);
+        logDebug(`${logPrefix} Executing command.`);
+        await command.execute(interaction); // Commands access client.t if needed
     } catch (error) {
-        console.error(`${logPrefix} Execution Error:`, error);
+        logError(`${logPrefix} Uncaught error during command execution:`, error);
         const errorMessage = interaction.client.t('general.error_command_execution');
         try {
+            // Try to inform the user, checking interaction state
             if (interaction.replied || interaction.deferred) {
                 await interaction.followUp({ content: errorMessage, ephemeral: true });
             } else {
                 await interaction.reply({ content: errorMessage, ephemeral: true });
             }
         } catch (replyError) {
-            console.error(`${logPrefix} Failed to send error reply to user:`, replyError);
+            logError(`${logPrefix} Failed to send command execution error reply to user:`, replyError);
         }
     }
 });
 
-// --- GuildMemberAdd Event (Refactored) ---
+// --- GuildMemberAdd Event (Handles New User Joins) ---
 client.on(Events.GuildMemberAdd, async member => {
-    // Fetch full member data if partial
-    const fullMember = await _ensureFullMemberData(member);
-    if (!fullMember || !fullMember.guild || !fullMember.user) {
-        console.error(`[GuildMemberAdd] Could not obtain full member data for joining member ID: ${member.id}. Cannot process join.`);
-        return; // Exit if we don't have critical info
+    const logPrefixBase = `[GuildMemberAdd][Guild:${member.guild?.id ?? 'N/A'}][User:${member.id}]`;
+    try {
+        // 1. Ensure Full Member Data (Handles partials)
+        const fullMember = await _ensureFullMemberData(member);
+        if (!fullMember) { // Also checks for missing user/guild internally
+            logWarn(`${logPrefixBase} Could not obtain full member data. Cannot process join.`);
+            return;
+        }
+        const { guild, user } = fullMember; // Use guaranteed non-null guild/user from fullMember
+        const logPrefix = `[GuildMemberAdd][Guild:${guild.id}][User:${user.id}]`; // Corrected prefix
+        logInfo(`${logPrefix} User ${user.tag} joined.`);
+
+        // 2. Permission Check (Crucial for fetching invites)
+        if (!_hasRequiredPermissions(guild, logPrefix)) {
+            // Warning already logged by _hasRequiredPermissions
+            return;
+        }
+
+        // 3. Delay for invite count stability (heuristic)
+        const inviteFetchDelay = 2500; // ms
+        logDebug(`${logPrefix} Waiting ${inviteFetchDelay}ms for invite count propagation...`);
+        await new Promise(resolve => setTimeout(resolve, inviteFetchDelay));
+
+        // 4. Fetch Current Invites (Safe fetch handles internal permissions/errors)
+        const currentInvites = await _fetchGuildInvitesSafe(guild, logPrefix);
+        // If fetch failed, currentInvites will be null. Subsequent logic handles this.
+
+        // 5. Ensure Invite Cache (Attempts to rebuild if missing)
+        const cachedUses = await _ensureInviteCache(guild, logPrefix);
+        if (!cachedUses) {
+            logWarn(`${logPrefix} Could not ensure invite cache. Skipping attribution.`);
+            return; // Error already logged by _ensureInviteCache
+        }
+
+        // 6. Get Bot-Tracked Invites from DB
+        const trackedUserInvites = await _getTrackedUserInvites(guild.id, logPrefix);
+        if (!trackedUserInvites) { // DB error occurred fetching tracked invites
+            logError(`${logPrefix} Failed to fetch tracked invites from DB. Skipping attribution.`);
+            await cacheGuildInvites(guild); // Still attempt to update cache before exiting
+            return;
+        }
+        if (trackedUserInvites.length === 0) {
+            logInfo(`${logPrefix} No bot-tracked invites found for this guild. Cannot attribute join.`);
+            await cacheGuildInvites(guild); // Update cache anyway, maybe a non-tracked invite was used
+            return;
+        }
+        logDebug(`${logPrefix} Found ${trackedUserInvites.length} tracked invite(s) in DB.`);
+
+        // 7. Compare Invites & Identify Attribution/Stale Invites
+        //    _findUsedInviteAndStale handles null currentInvites/cachedUses and logs ambiguity warnings
+        const { attribution, staleInviteIds } = _findUsedInviteAndStale(currentInvites, cachedUses, trackedUserInvites, logPrefix);
+
+        // 8. Cleanup Stale Invites (Asynchronously)
+        if (staleInviteIds.length > 0) {
+            _cleanupStaleInvites(staleInviteIds, guild.id, logPrefix); // Fire-and-forget cleanup
+        }
+
+        // 9. Create/Update TrackedJoin Record if Attributed
+        if (attribution) {
+            // Create/update the join record (awaits DB operation for consistency)
+            await _createOrUpdatePendingJoin(guild.id, user.id, attribution.inviterId, attribution.inviteCode, logPrefix);
+        } else {
+            // Attribution failed or no tracked invite used. Info/Warn logs handled within _findUsedInviteAndStale.
+        }
+
+        // 10. Update Cache with latest counts AFTER processing the join
+        logDebug(`${logPrefix} Updating invite cache after processing join...`);
+        await cacheGuildInvites(guild); // Update cache regardless of attribution success
+
+    } catch (error) {
+        logError(`${logPrefixBase} Uncaught error in GuildMemberAdd handler:`, error);
     }
-
-    const { guild, user } = fullMember; // Use data from the potentially fetched fullMember
-    const logPrefix = `[GuildMemberAdd][Guild:${guild.id}][User:${user.id}]`;
-    console.log(`${logPrefix} User ${user.tag} joined.`);
-
-    // 1. Permission Check
-    if (!_hasRequiredPermissions(guild, logPrefix)) return;
-
-    // 2. Delay for invite count update stability on Discord's side
-    await new Promise(resolve => setTimeout(resolve, 2500));
-
-    // 3. Fetch Current Invites (handles permissions internally)
-    const currentInvites = await _fetchGuildInvitesSafe(guild, logPrefix);
-    // If fetch fails (likely perms), currentInvites will be null. _findUsedInviteAndStale handles null.
-
-    // 4. Ensure Invite Cache (attempts to rebuild if missing)
-    const cachedUses = await _ensureInviteCache(guild, logPrefix);
-    if (!cachedUses) return; // Error already logged, cannot proceed without cache
-
-    // 5. Get Bot-Tracked Invites from DB
-    const trackedUserInvites = await _getTrackedUserInvites(guild.id, logPrefix);
-    if (!trackedUserInvites) { // DB error occurred
-        await cacheGuildInvites(guild); // Still attempt to update cache before exiting
-        return;
-    }
-    if (trackedUserInvites.length === 0) {
-        // console.log(`${logPrefix} No bot-tracked invites found for this guild.`); // Less verbose
-        await cacheGuildInvites(guild); // Update cache anyway, maybe non-tracked invite used
-        return;
-    }
-
-    // 6. Compare Invites & Identify Attribution/Stale Invites (Uses refactored helper)
-    const { attribution, staleInviteIds } = _findUsedInviteAndStale(currentInvites, cachedUses, trackedUserInvites, logPrefix);
-
-    // 7. Cleanup Stale Invites (async, don't wait)
-     if (staleInviteIds.length > 0) {
-        _cleanupStaleInvites(staleInviteIds, guild.id, logPrefix); // Fire-and-forget cleanup
-     }
-
-    // 8. Create TrackedJoin Record if Attributed
-    if (attribution) {
-        console.log(`${logPrefix} Attributed join to User ${attribution.inviterId} via code ${attribution.inviteCode}. Creating TrackedJoin record.`);
-        // Create/update the join record (awaits DB operation)
-        await _createOrUpdatePendingJoin(guild.id, user.id, attribution.inviterId, attribution.inviteCode, logPrefix);
-    } else {
-        // Logged inside _findUsedInviteAndStale if uses increased but no match
-        // console.log(`${logPrefix} No tracked invite code usage increased or attributed.`); // Less verbose
-    }
-
-    // 9. Update Cache with latest counts AFTER processing the join
-    await cacheGuildInvites(guild);
 });
 
 
-// --- GuildMemberRemove Event (Refactored) ---
+// --- GuildMemberRemove Event (Handles User Leaves/Kicks/Bans) ---
 client.on(Events.GuildMemberRemove, async member => {
-    // 1. Ensure Full Member Data
-    const fullMember = await _ensureFullMemberData(member);
-    if (!fullMember || !fullMember.guild || !fullMember.user) {
-        console.error(`[GuildMemberRemove] Could not obtain full member data or critical IDs for leaving member ID: ${member.id}. Cannot process leave.`);
-        return;
+    const logPrefixBase = `[GuildMemberRemove][Guild:${member.guild?.id ?? 'N/A'}][User:${member.id}]`;
+    try {
+        // 1. Ensure Full Member Data (Handles partials)
+        const fullMember = await _ensureFullMemberData(member);
+         if (!fullMember) { // Also checks for missing user/guild internally
+             logWarn(`${logPrefixBase} Could not obtain full member data. Cannot process leave accurately.`);
+             // Attempt update with just IDs if available, though less ideal
+             if (member.guild?.id && member.id) {
+                 await _markJoinsAsLeftEarly(member.guild.id, member.id, logPrefixBase);
+             }
+             return;
+         }
+        const { guild, user } = fullMember; // Use guaranteed non-null guild/user
+        const logPrefix = `[GuildMemberRemove][Guild:${guild.id}][User:${user.id}]`; // Corrected prefix
+        logInfo(`${logPrefix} User ${user.tag ?? user.id} left or was removed.`);
+
+        // 2. Update corresponding TrackedJoin Status to 'left_early'
+        await _markJoinsAsLeftEarly(guild.id, user.id, logPrefix);
+
+    } catch (error) {
+        logError(`${logPrefixBase} Uncaught error in GuildMemberRemove handler:`, error);
     }
-
-    const { guild, user } = fullMember;
-    const guildId = guild.id;
-    const userId = user.id;
-    const logPrefix = `[GuildMemberRemove][Guild:${guildId}][User:${userId}]`;
-    console.log(`${logPrefix} User ${user.tag ?? userId} left or was removed.`);
-
-    // 2. Update TrackedJoin Status
-    await _markJoinsAsLeftEarly(guildId, userId, logPrefix);
 });
 
 // --- Validation Task Helper Functions ---
 
 /**
- * Checks if a member is present in the guild, using a cache for the current run.
- * @param {object} join - The TrackedJoin document (lean).
+ * Checks if a member is present in the guild, using a cache for the current validation run.
+ * @param {object} join - The lean TrackedJoin document.
  * @param {Map<string, {status: 'present'|'left'|'error_skip', guild: import('discord.js').Guild|null}>} cache - Cache map for this run.
- * @param {string} logPrefix - Logging prefix.
- * @returns {Promise<{status: 'present'|'left'|'error_skip', guild: import('discord.js').Guild|null}>} - The presence status and guild object.
+ * @param {string} logPrefixVal - Logging prefix specific to validation task.
+ * @returns {Promise<{status: 'present'|'left'|'error_skip', guild: import('discord.js').Guild|null}>} - Presence status and guild object.
  */
-async function _checkMemberPresence(join, cache, logPrefix) {
+async function _checkMemberPresence(join, cache, logPrefixVal) {
     const memberCacheKey = `${join.guildId}-${join.inviteeId}`;
     if (cache.has(memberCacheKey)) {
+        logDebug(`${logPrefixVal} Cache hit for member ${join.inviteeId}@${join.guildId}.`);
         return cache.get(memberCacheKey);
     }
 
     const guild = client.guilds.cache.get(join.guildId);
     if (!guild) {
-        // console.warn(`${logPrefix} Guild ${join.guildId} not found in cache for user ${join.inviteeId}. Skipping.`);
+        logWarn(`${logPrefixVal} Guild ${join.guildId} not found in cache for validating user ${join.inviteeId}. Skipping this join.`);
         cache.set(memberCacheKey, { status: 'error_skip', guild: null });
         return { status: 'error_skip', guild: null };
     }
 
     try {
-        // Fetch member - force=false uses cache first, then API if needed.
+        // Fetch member - force=false uses cache first, then API if needed. Efficient.
         await guild.members.fetch({ user: join.inviteeId, force: false });
+        logDebug(`${logPrefixVal} Member ${join.inviteeId}@${join.guildId} is present.`);
         cache.set(memberCacheKey, { status: 'present', guild });
         return { status: 'present', guild };
     } catch (error) {
         if (error instanceof DiscordAPIError && (error.code === DISCORD_ERROR_CODES.UNKNOWN_MEMBER || error.code === DISCORD_ERROR_CODES.UNKNOWN_USER)) {
             // User definitely not in the guild
+            logDebug(`${logPrefixVal} Member ${join.inviteeId}@${join.guildId} is not present (Unknown Member/User).`);
             cache.set(memberCacheKey, { status: 'left', guild });
             return { status: 'left', guild };
         } else {
             // Other error (permissions, rate limit, etc.) - skip this user for this run
-            console.error(`${logPrefix} Error fetching member ${join.inviteeId}@${join.guildId} for validation:`, error);
+            logError(`${logPrefixVal} Error fetching member ${join.inviteeId}@${join.guildId} for validation:`, error);
             cache.set(memberCacheKey, { status: 'error_skip', guild });
             return { status: 'error_skip', guild };
         }
@@ -604,65 +709,70 @@ async function _checkMemberPresence(join, cache, logPrefix) {
 }
 
 /**
- * Prepares the update operation object for bulkWrite based on member status.
- * @param {object} join - The TrackedJoin document (lean).
- * @param {'present'|'left'} memberStatus - The status returned by _checkMemberPresence.
- * @param {Date} validationTime - The timestamp for the validation/leave event.
- * @param {string} logPrefix - Logging prefix.
- * @returns {object|null} - The `updateOne` operation object or null if status is invalid.
+ * Prepares the update operation object for MongoDB bulkWrite based on member presence status.
+ * @param {object} join - The lean TrackedJoin document.
+ * @param {'present'|'left'} memberStatus - The status from _checkMemberPresence.
+ * @param {Date} eventTime - The timestamp for the validation or leave event.
+ * @param {string} logPrefixVal - Logging prefix specific to validation task.
+ * @returns {object|null} - The `updateOne` operation object for bulkWrite, or null if status invalid.
  */
-function _prepareValidationUpdate(join, memberStatus, validationTime, logPrefix) {
+function _prepareValidationUpdate(join, memberStatus, eventTime, logPrefixVal) {
     let newStatus, updateData;
 
     if (memberStatus === 'present') {
         newStatus = 'validated';
-        updateData = { status: newStatus, validationTimestamp: validationTime };
+        updateData = { status: newStatus, validationTimestamp: eventTime };
+        logDebug(`${logPrefixVal} Preparing update for Join ID ${join._id}: Set status to '${newStatus}'.`);
     } else if (memberStatus === 'left') {
         newStatus = 'left_early';
-        updateData = { status: newStatus, leaveTimestamp: validationTime };
-         console.log(`${logPrefix} User ${join.inviteeId} (Join ID: ${join._id}) not in guild ${join.guildId}. Marking '${newStatus}'.`);
+        updateData = { status: newStatus, leaveTimestamp: eventTime };
+        logInfo(`${logPrefixVal} User ${join.inviteeId} (Join ID: ${join._id}) not in guild ${join.guildId}. Marking '${newStatus}'.`);
     } else {
-        return null; // Should not happen if called correctly
+        // Should not happen if called correctly after status check
+        logError(`${logPrefixVal} Invalid memberStatus '${memberStatus}' passed to _prepareValidationUpdate for Join ID ${join._id}.`);
+        return null;
     }
 
+    // Return object formatted for Mongoose bulkWrite
     return {
         updateOne: {
-            filter: { _id: join._id, status: 'pending' }, // Ensure status hasn't changed concurrently
+            filter: { _id: join._id, status: 'pending' }, // IMPORTANT: Only update if still pending
             update: { $set: updateData }
         }
     };
 }
 
-// --- Periodic Validation Function (Refactored) ---
+// --- Periodic Validation Function (Checks Pending Joins) ---
 async function validatePendingJoins() {
     const logPrefix = '[ValidationTask]';
-    console.log(`${logPrefix} Running validation check...`);
+    logInfo(`${logPrefix} Running periodic validation check...`);
 
     const validationCutoffDate = new Date(Date.now() - VALIDATION_PERIOD_MS);
-    const validationTime = new Date(); // Use consistent time for this batch
-    const bulkOps = [];
-    const guildMemberPresenceCache = new Map(); // Cache presence checks per run
+    const validationTime = new Date(); // Use a consistent time for all updates in this batch
+    const bulkOps = []; // Array to hold update operations for bulkWrite
+    const guildMemberPresenceCache = new Map(); // Cache presence checks *per run*
 
     try {
-        // Find potential candidates efficiently
+        // 1. Find candidate joins efficiently using index on status and joinTimestamp
         const candidates = await TrackedJoin.find({
             status: 'pending',
-            joinTimestamp: { $lte: validationCutoffDate } // Only check joins older than the period
-        }).lean(); // Use lean for performance
+            joinTimestamp: { $lte: validationCutoffDate } // Only check joins older than the validation period
+        }).lean(); // Use lean for performance as we only need IDs and timestamps
 
         if (candidates.length === 0) {
-             // console.log(`${logPrefix} No pending joins found older than the validation period.`); // Less verbose
+             logInfo(`${logPrefix} No pending joins found older than the validation period (${validationPeriodDays} days).`);
              return;
         }
-        console.log(`${logPrefix} Found ${candidates.length} candidate join(s) eligible for validation.`);
+        logInfo(`${logPrefix} Found ${candidates.length} candidate join(s) eligible for validation/update.`);
 
-        // Process candidates
+        // 2. Process candidates: check presence and prepare bulk operations
         for (const join of candidates) {
-            // Check member presence using helper (handles caching and errors)
+            // Check member presence using helper (handles caching and fetch errors)
             const presenceResult = await _checkMemberPresence(join, guildMemberPresenceCache, logPrefix);
 
-            // Skip if there was an error fetching guild/member info
+            // Skip if there was an error fetching guild/member info for this join
             if (presenceResult.status === 'error_skip') {
+                logWarn(`${logPrefix} Skipping Join ID ${join._id} due to error during presence check.`);
                 continue;
             }
 
@@ -673,103 +783,145 @@ async function validatePendingJoins() {
             }
         } // End candidate loop
 
-        // Execute Bulk Write if there are operations to perform
+        // 3. Execute Bulk Write if there are operations to perform
         if (bulkOps.length > 0) {
             const validatedCount = bulkOps.filter(op => op.updateOne.update.$set.status === 'validated').length;
             const leftEarlyCount = bulkOps.length - validatedCount;
-            console.log(`${logPrefix} Preparing bulk update: ${validatedCount} to 'validated', ${leftEarlyCount} to 'left_early'.`);
+            logInfo(`${logPrefix} Preparing bulk update for ${bulkOps.length} records: ${validatedCount} to 'validated', ${leftEarlyCount} to 'left_early'.`);
             try {
-                const result = await TrackedJoin.bulkWrite(bulkOps, { ordered: false }); // Unordered for better performance
-                console.log(`${logPrefix} Bulk update result: ${result.modifiedCount ?? 0} modified (Matched: ${result.matchedCount ?? 0}).`);
-                // Check for potential inconsistencies
-                 if (result.modifiedCount !== bulkOps.length && result.matchedCount === bulkOps.length) {
-                      console.warn(`${logPrefix} Warning: Modified count (${result.modifiedCount}) differs from matched count (${result.matchedCount}). Some records might have already been updated.`);
-                  } else if (result.matchedCount !== bulkOps.length) {
-                     console.warn(`${logPrefix} Warning: Matched count (${result.matchedCount}) differs from expected operations (${bulkOps.length}). Some records might have changed status before update.`);
-                  }
-                 if (result.hasWriteErrors()) {
-                     console.error(`${logPrefix} Bulk write reported errors:`, result.getWriteErrors());
-                 }
+                // Use ordered: false for potentially better performance if order doesn't matter
+                const result = await TrackedJoin.bulkWrite(bulkOps, { ordered: false });
+                logInfo(`${logPrefix} Bulk update result: ${result.modifiedCount ?? 0} modified (Matched: ${result.matchedCount ?? 0}).`);
+
+                // Log warnings for potential inconsistencies (e.g., status changed between find and update)
+                if (result.modifiedCount !== bulkOps.length && result.matchedCount === bulkOps.length) {
+                    logWarn(`${logPrefix} Modified count (${result.modifiedCount}) differs from matched count (${result.matchedCount}). Some records might have already been updated by another process?`);
+                } else if (result.matchedCount !== bulkOps.length) {
+                    logWarn(`${logPrefix} Matched count (${result.matchedCount}) differs from expected operations (${bulkOps.length}). Some records might have changed status before update attempt.`);
+                }
+                if (result.hasWriteErrors()) {
+                    logError(`${logPrefix} Bulk write reported errors:`, result.getWriteErrors());
+                }
 
             } catch (bulkWriteError) {
-                console.error(`${logPrefix} Error executing bulk write:`, bulkWriteError);
+                logError(`${logPrefix} Error executing bulk write for validation updates:`, bulkWriteError);
             }
         } else {
-             console.log(`${logPrefix} No update operations needed after checking ${candidates.length} candidate(s).`);
+             logInfo(`${logPrefix} No update operations needed after checking ${candidates.length} candidate(s).`);
         }
 
     } catch (error) {
-        console.error(`${logPrefix} Critical error during validation process query or loop:`, error);
+        // Catch errors during the initial find() or the processing loop itself
+        logError(`${logPrefix} Critical error during validation process:`, error);
     } finally {
-        // Clear cache after run to avoid stale data in next run
+        // Clear the presence cache after each run to avoid stale data in the next interval
         guildMemberPresenceCache.clear();
+        logDebug(`${logPrefix} Cleared guild member presence cache.`);
+        logInfo(`${logPrefix} Validation check finished.`);
     }
 }
 
 // --- Other Client Event Handlers ---
 
 client.on(Events.GuildCreate, async guild => {
-    console.log(`Joined new guild: ${guild.name} (ID: ${guild.id}). Members: ${guild.memberCount}`);
-    await cacheGuildInvites(guild); // Cache invites immediately
+    try {
+        logInfo(`Joined new guild: ${guild.name} (ID: ${guild.id}). Members: ${guild.memberCount}`);
+        logInfo(`[GuildCreate][Guild:${guild.id}] Caching invites for new guild...`);
+        await cacheGuildInvites(guild); // Cache invites immediately
+    } catch (error) {
+        logError(`[GuildCreate][Guild:${guild.id}] Error during initial setup:`, error);
+    }
 });
 
 client.on(Events.GuildDelete, async guild => {
-    // Handle cases where guild object might be incomplete on leave
+    // Handle cases where guild object might be incomplete on leave/kick
     const guildId = guild?.id;
-    const guildName = guild?.name ?? `ID: ${guildId}`;
+    const guildName = guild?.name ?? `ID: ${guildId ?? 'Unknown'}`;
 
-    if (!guildId) {
-        console.log(`Left or was removed from a guild (ID unavailable). Cache/DB cleanup skipped.`);
-        return;
+    try {
+        if (!guildId) {
+            logWarn(`[GuildDelete] Left or was removed from a guild (ID unavailable). Cache/DB cleanup skipped.`);
+            return;
+        }
+        logInfo(`[GuildDelete] Left guild: ${guildName} (ID: ${guildId}).`);
+
+        // Clear invite cache for the guild
+        const deleted = inviteUsesCache.delete(guildId);
+        if(deleted) logInfo(`[GuildDelete] Cleared invite cache for guild ${guildId}.`);
+        else logWarn(`[GuildDelete] No cache entry found for guild ${guildId} to clear.`);
+
+        // Perform database cleanup if enabled
+        await _performGuildCleanup(guildId);
+
+    } catch (error) {
+        logError(`[GuildDelete][Guild:${guildId ?? 'Unknown'}] Error during cleanup:`, error);
     }
-    console.log(`Left guild: ${guildName}.`);
-    inviteUsesCache.delete(guildId); // Clear cache
-    console.log(`[GuildDelete] Cleared invite cache for guild ${guildId}.`);
-    await _performGuildCleanup(guildId); // Perform DB cleanup if enabled
 });
 
-client.on(Events.Warn, warning => console.warn('[Discord Client Warning]', warning));
-client.on(Events.Error, error => console.error('[Discord Client Error]', error));
+// Log general warnings and errors from the Discord client
+client.on(Events.Warn, warning => logWarn('[Discord Client Warning]', warning));
+client.on(Events.Error, error => logError('[Discord Client Error]', error));
 
 // --- Bot Login ---
-console.log("Attempting to log in to Discord...");
+logInfo("Attempting to log in to Discord...");
 client.login(TOKEN).catch(error => {
-    console.error("FATAL ERROR: Failed to login to Discord:", error);
-    if (error.code === DISCORD_ERROR_CODES.TOKEN_INVALID || error.message.includes('TOKEN_INVALID')) { // d.js v14 uses message sometimes
-        console.error("Hint: The DISCORD_TOKEN in .env is invalid or missing.");
-    } else if (error.message.includes('disallowed intents') || error.message.includes('Privileged Intents')) {
-        console.error("Hint: Ensure Guilds, GuildInvites, and GuildMembers (Privileged) intents are enabled in the Discord Developer Portal.");
+    logError("FATAL ERROR: Failed to login to Discord:", error);
+    if (error.code === DISCORD_ERROR_CODES.TOKEN_INVALID || error.message?.includes('TOKEN_INVALID')) {
+        logError("Hint: The DISCORD_TOKEN in .env is invalid or missing.");
+    } else if (error.message?.includes('disallowed intents') || error.message?.includes('Privileged Intents')) {
+        logError("Hint: Ensure Guilds, GuildInvites, and GuildMembers (Privileged) intents are enabled in the Discord Developer Portal for the bot application.");
     } else if (error.code === 50013) { // Missing Permissions general code
-         console.error("Hint: Bot might be missing critical permissions in some guilds (e.g., View Channel, Send Messages, Manage Guild for invite tracking).");
+         logError("Hint: Bot might be missing critical permissions in some guilds (e.g., View Channel, Send Messages, Manage Guild for invite tracking). Check roles and channel overrides.");
+    } else if (error.code === 'CONNECT_TIMEOUT' || error.message?.includes('timeout')) {
+         logError("Hint: Connection to Discord timed out. Check network connectivity and Discord status.");
     }
-    process.exit(1);
+    process.exit(1); // Exit if login fails
 });
 
-// --- Graceful Shutdown ---
+// --- Graceful Shutdown Handling ---
 async function shutdown(signal) {
-    console.log(`Received ${signal}. Shutting down gracefully...`);
+    logInfo(`Received ${signal}. Shutting down gracefully...`);
+    // Stop accepting new events/commands - client.destroy() handles this mostly
+    // Optionally: Stop interval timers explicitly `clearInterval(...)`
+
     if (client && typeof client.destroy === 'function') {
+        logInfo('Destroying Discord client...');
         client.destroy();
-        console.log('Discord client destroyed.');
+        logInfo('Discord client destroyed.');
     } else {
-        console.log('Discord client already destroyed or unavailable.');
+        logInfo('Discord client already destroyed or unavailable.');
     }
+
     try {
-        // Check mongoose state before trying to close
+        // Check Mongoose connection state before trying to close
         if (mongoose.connection.readyState === 1 || mongoose.connection.readyState === 2) { // Connected or Connecting
+            logInfo('Closing MongoDB connection...');
             await mongoose.connection.close();
-            console.log('MongoDB connection closed successfully.');
+            logInfo('MongoDB connection closed successfully.');
         } else {
-            console.log('MongoDB connection already closed or not established.');
+            logInfo(`MongoDB connection already closed or not established (State: ${mongoose.connection.readyState}).`);
         }
     } catch (err) {
-        console.error('Error closing MongoDB connection during shutdown:', err);
+        logError('Error closing MongoDB connection during shutdown:', err);
     } finally {
-        console.log('Exiting process.');
+        logInfo('Exiting process.');
         process.exit(0); // Exit cleanly
     }
 }
 
-// Ensure only one handler is attached for each signal
+// Ensure only one handler is attached for each signal to prevent multiple shutdowns
 process.removeAllListeners('SIGINT').on('SIGINT', () => shutdown('SIGINT'));
 process.removeAllListeners('SIGTERM').on('SIGTERM', () => shutdown('SIGTERM'));
+
+// Optional: Catch unhandled promise rejections and uncaught exceptions
+process.on('unhandledRejection', (reason, promise) => {
+    logError('Unhandled Rejection at:', promise, 'reason:', reason);
+    // Consider exiting or implementing more robust error handling/reporting
+    // process.exit(1);
+});
+
+process.on('uncaughtException', (error, origin) => {
+    logError(`Uncaught Exception: ${error.message}\nOrigin: ${origin}\nStack: ${error.stack}`);
+    // It's generally recommended to exit after an uncaught exception
+    process.exit(1);
+});
