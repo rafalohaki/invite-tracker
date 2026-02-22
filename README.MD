@@ -1,142 +1,133 @@
 # Discord Invite Tracker Bot 🤖
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Bun](https://img.shields.io/badge/Bun-%23000000.svg?style=flat&logo=bun&logoColor=white)](https://bun.sh)
+[![Discord.js](https://img.shields.io/badge/discord.js-v14-blue.svg?logo=discord&logoColor=white)](https://discord.js.org)
 
-A Node.js/discord.js v14 bot to track user-generated invites, validate joins based on server stay duration (default: 1 week), and display a leaderboard. Supports custom language translation via YAML.
+A high-performance Discord bot built with **Bun** and **discord.js v14** to track user-generated invites, validate joins based on server stay duration (default: 7 days), and manage a leaderboard. Optimized with **SQLite** for lightweight and reliable data management.
+
+---
 
 ## ✨ Core Features
 
-*   **Personal Invite Links:** Users generate unique, permanent server invites via `/invite`.
-*   **Validated & Pending Counts:** `/invite` shows the user's link, validated invites (stayed > 1 week), and pending invites (joined, awaiting validation).
-*   **Invite Leaderboard:** `/leaderboard` ranks users by *validated* invite count.
-*   **Smart Link Management:** Auto-generates new links via `/invite` if the previous one is invalid.
-*   **Accurate Join/Leave Tracking:** Attributes joins via invite usage comparison and handles members leaving before validation (`left_early`).
-*   **Periodic Validation:** Automatically checks and updates the status of pending joins.
-*   **Reliable & Configurable:** Uses MongoDB, `.env` for secrets, and `config.js` for settings.
-*   **🌍 Customizable Language:** User-facing text can be customized/translated via `custom-lang.yaml`.
+*   **⚡ High Performance:** Powered by the **Bun** runtime and native **SQLite** driver.
+*   **🔗 Personal Invite Links:** Users generate unique, permanent server invites via the `/invite` command.
+*   **⏳ Intelligent Validation:** Tracks "Pending" joins and automatically validates them after the user stays for a configurable period (default: 7 days).
+*   **📉 Real-time Stats:** `/invite` shows the user's link, validated invites, and pending counts.
+*   **🏆 Leaderboard:** `/leaderboard` ranks the top inviters based on *validated* successful joins.
+*   **🛡️ Admin Tools:** `/check <user>` allows administrators to inspect any user's invite statistics.
+*   **🌍 Multi-language Support:** Fully customizable translations via `custom-lang.yaml`.
+*   **🧹 Automatic Cleanup:** Detects deleted invites on Discord and syncs the database.
+
+---
 
 ## 💻 Technology Stack
 
-*   **Runtime:** Node.js (v16.9.0 or newer recommended)
+*   **Runtime:** [Bun](https://bun.sh) (v1.0.0+)
 *   **Library:** discord.js v14
-*   **Database:** MongoDB (via Mongoose ODM)
+*   **Database:** SQLite (via native `bun:sqlite` — zero external DB dependencies)
 *   **Configuration:** dotenv (for environment variables)
-*   **Translations:** js-yaml (for parsing `custom-lang.yaml`)
+*   **Translations:** js-yaml (YAML-based internationalization)
+
+---
 
 ## ✅ Prerequisites
 
-*   **Node.js:** v16.9.0+ ([Download](https://nodejs.org/))
-*   **npm:** Included with Node.js.
-*   **MongoDB:** Access to a MongoDB instance and its connection string (URI).
-*   **Discord Account:** For bot application creation.
+*   **Bun Runtime:** Installed on your system ([Installation Guide](https://bun.sh/docs/installation)).
+*   **Discord Bot Application:** Created via the [Discord Developer Portal](https://discord.com/developers/applications).
+
+---
 
 ## 🛠️ Setup & Installation
 
-1.  **Clone:**
+1.  **Clone the Repository:**
     ```bash
-    git clone https://github.com/your-username/dcinvitetracker # Replace with your repo URL if forked
-    cd dcinvitetracker
+    git clone https://github.com/your-username/invite-tracker.git
+    cd invite-tracker
     ```
 
 2.  **Install Dependencies:**
     ```bash
-    npm install
+    bun install
     ```
-    *(This installs discord.js, mongoose, dotenv, js-yaml, etc.)*
 
-3.  **Create Discord Bot Application:**
-    *   Go to [Discord Developer Portal](https://discord.com/developers/applications).
-    *   Create "New Application".
-    *   Go to "**Bot**" tab -> "**Add Bot**".
-    *   **🚨 Enable Privileged Gateway Intents:**
-        *   `GUILD_MEMBERS` (**Required** for join/leave detection).
-        *   `MESSAGE_CONTENT` (Optional, likely not needed).
-    *   **🔑 Copy Bot Token:** Reset/View Token -> Copy securely.
-    *   **📋 Copy Client ID:** Go to "**OAuth2**" -> "**General**" -> Copy "**Application ID**".
+3.  **Discord Bot Configuration:**
+    *   Create a "New Application" in the portal.
+    *   Under the **Bot** tab, enable **Privileged Gateway Intents**:
+        *   `GUILD_MEMBERS` (**CRITICAL** for tracking joins/leaves).
+    *   Reset/Copy the **Bot Token**.
+    *   Under **OAuth2**, copy the **Client ID** (Application ID).
 
-4.  **Configure Environment Variables:**
-    *   Create a `.env` file in the project root (you can copy/rename `.env.example` if one exists, or create it manually).
-    *   Add necessary variables (see below). **Keep this file secure!**
-
+4.  **Environment Setup:**
+    Create a `.env` file in the project root:
     ```dotenv
-    # .env
+    # --- Discord Credentials ---
+    DISCORD_TOKEN=your_bot_token_here
+    CLIENT_ID=your_client_id_here
 
-    # --- Core Settings ---
-    DISCORD_TOKEN=YOUR_BOT_TOKEN_HERE
-    CLIENT_ID=YOUR_CLIENT_ID_HERE
-    MONGODB_URI=YOUR_MONGODB_CONNECTION_STRING_HERE # e.g., mongodb://user:pass@host:port/db
-    ADMIN_IDS=YOUR_ADMIN_ID_1,YOUR_ADMIN_ID_2 # Comma-separated Discord User IDs for admin commands (no spaces!)
+    # --- Admin Access ---
+    # Comma-separated list of Discord User IDs allowed to use /check
+    ADMIN_IDS=123456789012345678,987654321098765432
 
-    # --- Language Configuration ---
-    # Set to 'custom' to use translations from the 'custom:' section in custom-lang.yaml (falls back to 'en' for missing keys).
-    # Set to 'en' (or leave blank/comment out) to use only the default 'en:' section from custom-lang.yaml.
-    LOCALE_LANG=custom
+    # --- Localization ---
+    # 'en' or 'custom' (uses custom-lang.yaml)
+    LOCALE_LANG=en
 
     # --- Optional Settings ---
-    # TEST_GUILD_ID=YOUR_TEST_SERVER_ID_HERE # For faster command testing/deployment
-    # VALIDATION_PERIOD_DAYS=7               # Override default 7 days stay requirement
-    # VALIDATION_CHECK_INTERVAL_MINUTES=60   # Override default 60 min validation check
-    # PERFORM_GUILD_DELETE_CLEANUP=false     # Set true to delete DB data when bot leaves guild
-
-    # --- Logging Configuration ---
-    # Optional: Set desired logging level (DEBUG, INFO, WARN, ERROR). Defaults to INFO if omitted.
-    # DEBUG: Shows detailed step-by-step information.
-    # INFO: Standard operational information (recommended for production).
-    # WARN: Potential issues or non-critical errors.
-    # ERROR: Critical errors that might affect functionality.
-    LOG_LEVEL=INFO
+    # TEST_GUILD_ID=your_guild_id_here (for instant slash command updates)
+    # LOG_LEVEL=INFO (DEBUG | INFO | WARN | ERROR)
+    # VALIDATION_PERIOD_DAYS=7
+    # VALIDATION_CHECK_INTERVAL_MINUTES=60
+    # PERFORM_GUILD_DELETE_CLEANUP=false
     ```
 
-5.  **Customize Language (Optional):**
-    *   Edit the `dcinvitetracker/custom-lang.yaml` file.
-    *   Modify the strings under the `custom:` section for your desired language.
-    *   Use the `en:` section as a reference for keys and placeholders (e.g., `{variable_name}`). The structure (like `invite.embed_title`) must match.
-    *   Ensure `LOCALE_LANG=custom` is set in your `.env` file to activate these custom translations. If `LOCALE_LANG` is set to `en` or is missing, only the `en:` section will be used.
-
-6.  **Invite Bot to Server:**
-    *   Go to Developer Portal -> Your App -> "**OAuth2**" -> "**URL Generator**".
-    *   **Scopes**: `bot`, `application.commands` (Required).
-    *   **Bot Permissions**:
-        *   `Manage Guild` (Required for accurate invite fetching/tracking).
-        *   `Create Instant Invite` (Required for the `/invite` command).
-        *   `Send Messages`, `Embed Links`, `Read Message History` (Basic functionality).
-    *   Copy the generated URL -> Paste it in your browser -> Select your server and authorize the bot.
-
-7.  **Deploy Slash Commands:**
+5.  **Deploy Slash Commands:**
     ```bash
-    node deploy-commands.js
-    ```
-    *   **Global Deployment:** If `TEST_GUILD_ID` is *not* set in `.env`, commands deploy globally (updates can take up to 1 hour).
-    *   Make sure the bot has the `application.commands` scope when invited.
-    *   **Test Guild Deployment:** If `TEST_GUILD_ID` *is* set in `.env`, commands deploy only to that specific guild (updates are near-instant). Recommended for development.
-
-8.  **Run the Bot:**
-    ```bash
-    npm start # Uses the script defined in package.json
-    # Or alternatively: node index.js
+    bun run deploy
     ```
 
-## ⚙️ Configuration Summary
+---
 
-*   **`.env`:** Contains sensitive credentials (Bot Token, DB URI), your Admin ID(s) (`ADMIN_IDS`), the target language setting (`LOCALE_LANG`), deployment settings (Test Guild ID), and optional behavioral overrides (validation period, cleanup). **Keep Private!**
-*   **`custom-lang.yaml`:** Stores all user-facing text strings. Edit the `custom:` section for your own translations/phrasing. Requires `LOCALE_LANG=custom` in `.env` to be active (uses `en:` as fallback). If `LOCALE_LANG` is `en` or missing, only `en:` is used.
-*   **`config.js`:** Contains non-sensitive, general bot settings like embed colors and default limits/intervals that are less likely to change per deployment.
+## 🚀 Running the Bot
+
+**Development Mode (with hot reload):**
+```bash
+bun run dev
+```
+
+**Production Mode:**
+```bash
+bun run start
+```
+
+---
+
+## 📂 Project Structure
+
+- `index.js`: Main entry point and Discord client event handlers.
+- `database/db.js`: Centralized SQLite interface using `bun:sqlite`.
+- `commands/`: Individual slash command definitions (`invite`, `leaderboard`, `check`).
+- `utils/logger.js`: Shared logging utility with configurable levels.
+- `utils/translator.js`: Localization helper for `custom-lang.yaml`.
+- `config.js`: Non-sensitive runtime configuration (colors, limits).
+
+---
 
 ## 🎮 Usage
 
-*   `/invite`: Shows your personal invite link, your validated invite count (users who joined via your link and stayed > 1 week), and your pending invite count (users who joined but haven't stayed 1 week yet). Automatically generates a new link if needed.
-*   `/leaderboard`: Displays a ranked list of users based on their *validated* invite count.
-*   `/check <user>`: **[Admin Only]** Displays the invite link, validated count, and pending count for the specified user. Requires your Discord ID to be listed in `ADMIN_IDS` in the `.env` file.
+| Command | Description |
+| :--- | :--- |
+| `/invite` | Shows your unique link and your invite stats. |
+| `/leaderboard` | Displays the top server inviters. |
+| `/check <user>` | **[Admin]** View stats for a specific member. |
 
-## 💡 Deployment Notes
-
-*   Run `node deploy-commands.js` whenever you add or modify the *structure* (name, options, description) of slash commands defined in the `/commands` directory.
-*   Use `TEST_GUILD_ID` in `.env` for faster development and testing command updates. Remove or comment it out for global production deployment.
-*   Set `LOCALE_LANG` in `.env` to `en` or `custom` to control which language strings are used from `custom-lang.yaml`.
+---
 
 ## 🤝 Contributing
 
-Contributions, issues, and feature requests are welcome! Please feel free to fork the repository, make changes, and submit pull requests. For major changes, please open an issue first to discuss what you would like to change.
+Contributions are welcome! Please feel free to open issues or submit pull requests to improve the project.
+
+---
 
 ## 📜 License
 
