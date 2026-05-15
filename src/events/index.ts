@@ -11,7 +11,7 @@ import { type ReadyHandles, registerReady } from './ready.ts';
 export function registerEvents(client: AppClient, ctx: AppContext): ReadyHandles {
     const handles: ReadyHandles = { cancelValidation: () => {} };
     registerReady(client, ctx, handles);
-    registerInteractionCreate(client);
+    registerInteractionCreate(client, ctx);
     registerGuildCreate(client);
     registerGuildDelete(client, ctx);
     registerGuildMemberAdd(client, ctx);

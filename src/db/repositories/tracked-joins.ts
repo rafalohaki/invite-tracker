@@ -23,6 +23,8 @@ export class TrackedJoinsRepository {
     private readonly stmtCountByStatus;
     private readonly stmtLeaderboardAll;
     private readonly stmtLeaderboardSince;
+    private readonly stmtLeaderboardAllPage;
+    private readonly stmtLeaderboardSincePage;
     private readonly stmtDeleteAllInGuild;
 
     constructor(private readonly db: Database) {
@@ -78,6 +80,22 @@ export class TrackedJoinsRepository {
              GROUP BY inviterId
              ORDER BY count DESC, inviterId ASC
              LIMIT ?`,
+        );
+        this.stmtLeaderboardAllPage = db.query<LeaderboardEntryRow, [string, number, number]>(
+            `SELECT inviterId, COUNT(*) as count
+             FROM TrackedJoins
+             WHERE guildId = ? AND status = 'validated'
+             GROUP BY inviterId
+             ORDER BY count DESC, inviterId ASC
+             LIMIT ? OFFSET ?`,
+        );
+        this.stmtLeaderboardSincePage = db.query<LeaderboardEntryRow, [string, string, number, number]>(
+            `SELECT inviterId, COUNT(*) as count
+             FROM TrackedJoins
+             WHERE guildId = ? AND status = 'validated' AND joinTimestamp >= ?
+             GROUP BY inviterId
+             ORDER BY count DESC, inviterId ASC
+             LIMIT ? OFFSET ?`,
         );
         this.stmtDeleteAllInGuild = db.prepare<unknown, [string]>('DELETE FROM TrackedJoins WHERE guildId = ?');
     }
@@ -141,6 +159,21 @@ export class TrackedJoinsRepository {
         const days = PERIOD_TO_DAYS[period];
         const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
         return this.stmtLeaderboardSince.all(guildId, cutoff, limit);
+    }
+
+    /** Paginated leaderboard. Callers pass `limit+1` to peek for hasMore without a separate count query. */
+    getLeaderboardPage(
+        guildId: string,
+        limit: number,
+        offset: number,
+        period: LeaderboardPeriod,
+    ): LeaderboardEntryRow[] {
+        if (period === 'all') {
+            return this.stmtLeaderboardAllPage.all(guildId, limit, offset);
+        }
+        const days = PERIOD_TO_DAYS[period];
+        const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+        return this.stmtLeaderboardSincePage.all(guildId, cutoff, limit, offset);
     }
 
     deleteAllInGuild(guildId: string): number {

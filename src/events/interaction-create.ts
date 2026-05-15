@@ -1,13 +1,22 @@
 import { Events, MessageFlags } from 'discord.js';
 import { t } from '@/i18n/translator.ts';
-import type { AppClient } from '@/types/discord.ts';
+import { handleLeaderboardButton } from '@/interactions/handle-leaderboard-button.ts';
+import type { AppClient, AppContext } from '@/types/discord.ts';
 import { logDebug, logError } from '@/utils/logger.ts';
 
-export function registerInteractionCreate(client: AppClient): void {
+export function registerInteractionCreate(client: AppClient, ctx: AppContext): void {
     client.on(Events.InteractionCreate, async (interaction) => {
         const logPrefix = `[Interaction][User:${interaction.user.id}][Guild:${interaction.guildId ?? 'N/A'}]`;
 
-        // Autocomplete first (cheap, no defer).
+        // Button dispatcher — currently only leaderboard pagination.
+        if (interaction.isButton()) {
+            if (interaction.customId.startsWith('lb:')) {
+                await handleLeaderboardButton(interaction, ctx);
+            }
+            return;
+        }
+
+        // Autocomplete next (cheap, no defer).
         if (interaction.isAutocomplete()) {
             const command = client.commands.get(interaction.commandName);
             if (!command?.autocomplete) return;
