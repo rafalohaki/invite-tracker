@@ -11,3 +11,9 @@ invites.db-shm
 *.sqlite-journal
 *.sqlite-wal
 *.sqlite-shm
+
+# Build / coverage / cache artifacts
+dist
+coverage
+.bun
+.DS_Store

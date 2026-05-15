@@ -1,0 +1,15 @@
+node_modules
+.git
+.github
+tests
+coverage
+dist
+*.md
+*.log
+.env
+.env.*
+invites.db
+invites.db-*
+*.sqlite
+*.sqlite-*
+.DS_Store

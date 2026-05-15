@@ -1,0 +1,24 @@
+services:
+    bot:
+        build:
+            context: ..
+            dockerfile: deploy/Dockerfile
+        image: invite-tracker:latest
+        container_name: invite-tracker
+        restart: unless-stopped
+        env_file:
+            - ../.env
+        environment:
+            - DATABASE_PATH=/data/invites.db
+            - NODE_ENV=production
+        volumes:
+            - invite-data:/data
+        logging:
+            driver: json-file
+            options:
+                max-size: "10m"
+                max-file: "3"
+
+volumes:
+    invite-data:
+        name: invite-tracker-data
