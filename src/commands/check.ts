@@ -1,16 +1,16 @@
 import {
+    ApplicationIntegrationType,
     type ChatInputCommandInteraction,
     EmbedBuilder,
     InteractionContextType,
     MessageFlags,
     SlashCommandBuilder,
 } from 'discord.js';
+import { EMBED_COLORS } from '@/config/constants.ts';
 import { env } from '@/config/env.ts';
 import { t } from '@/i18n/translator.ts';
 import type { AppContext, Command } from '@/types/discord.ts';
 import { logError, logInfo, logWarn } from '@/utils/logger.ts';
-
-const CHECK_EMBED_COLOR = 0x0099ff;
 
 export function buildCheckCommand(ctx: AppContext): Command {
     return {
@@ -20,7 +20,8 @@ export function buildCheckCommand(ctx: AppContext): Command {
             .addUserOption((opt) =>
                 opt.setName('user').setDescription('The user whose invite stats to inspect.').setRequired(true),
             )
-            .setContexts(InteractionContextType.Guild),
+            .setContexts(InteractionContextType.Guild)
+            .setIntegrationTypes(ApplicationIntegrationType.GuildInstall),
         async execute(interaction: ChatInputCommandInteraction) {
             const { user, guild, options } = interaction;
             if (!guild) {
@@ -69,7 +70,7 @@ export function buildCheckCommand(ctx: AppContext): Command {
                 const flagged = ctx.repos.joinHistory.getFlaggedForUser(guild.id, targetId);
 
                 const embed = new EmbedBuilder()
-                    .setColor(CHECK_EMBED_COLOR)
+                    .setColor(EMBED_COLORS.check)
                     .setTitle(t('check.embed_title', { username: targetUser.username }, guildLocale))
                     .setDescription(
                         t(

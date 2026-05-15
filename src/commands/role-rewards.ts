@@ -1,4 +1,5 @@
 import {
+    ApplicationIntegrationType,
     type ChatInputCommandInteraction,
     EmbedBuilder,
     InteractionContextType,
@@ -6,17 +7,17 @@ import {
     PermissionFlagsBits,
     SlashCommandBuilder,
 } from 'discord.js';
+import { EMBED_COLORS } from '@/config/constants.ts';
 import type { AppContext, Command } from '@/types/discord.ts';
 import { logError, logInfo } from '@/utils/logger.ts';
 import { canAssignRole } from '@/utils/permissions.ts';
-
-const ROLE_REWARDS_EMBED_COLOR = 0x57f287;
 
 export function buildRoleRewardsCommand(ctx: AppContext): Command {
     const data = new SlashCommandBuilder()
         .setName('role-rewards')
         .setDescription('Manage role rewards for validated invites (admin only).')
         .setContexts(InteractionContextType.Guild)
+        .setIntegrationTypes(ApplicationIntegrationType.GuildInstall)
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
         .addSubcommand((s) =>
             s
@@ -126,7 +127,7 @@ export function buildRoleRewardsCommand(ctx: AppContext): Command {
                     }
                     const lines = rewards.map((r) => `• \`${r.threshold}\` validated → <@&${r.roleId}>`);
                     const embed = new EmbedBuilder()
-                        .setColor(ROLE_REWARDS_EMBED_COLOR)
+                        .setColor(EMBED_COLORS.roleRewards)
                         .setTitle(`Role rewards for ${guild.name}`)
                         .setDescription(lines.join('\n'))
                         .setFooter({ text: `${rewards.length} reward(s) configured` });

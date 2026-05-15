@@ -1,20 +1,21 @@
 import {
+    ApplicationIntegrationType,
     ChannelType,
     type ChatInputCommandInteraction,
     EmbedBuilder,
     type Guild,
     type GuildBasedChannel,
+    InteractionContextType,
     type Invite,
     MessageFlags,
     PermissionFlagsBits,
     SlashCommandBuilder,
 } from 'discord.js';
+import { EMBED_COLORS } from '@/config/constants.ts';
 import { t } from '@/i18n/translator.ts';
 import type { AppContext, Command } from '@/types/discord.ts';
 import { DISCORD_ERROR_CODES, hasErrorCode, isUnknownInvite } from '@/utils/discord-errors.ts';
 import { logError, logInfo, logWarn } from '@/utils/logger.ts';
-
-const INVITE_EMBED_COLOR = 0x0099ff;
 
 const INVITE_CAPABLE_CHANNEL_TYPES = new Set<number>([
     ChannelType.GuildText,
@@ -92,7 +93,11 @@ async function createNewInvite(
 
 export function buildInviteCommand(ctx: AppContext): Command {
     return {
-        data: new SlashCommandBuilder().setName('invite').setDescription('Show your personal invite link and stats.'),
+        data: new SlashCommandBuilder()
+            .setName('invite')
+            .setDescription('Show your personal invite link and stats.')
+            .setContexts(InteractionContextType.Guild)
+            .setIntegrationTypes(ApplicationIntegrationType.GuildInstall),
         async execute(interaction: ChatInputCommandInteraction) {
             const { user, guild, channel } = interaction;
             if (!guild || !channel || !('guild' in channel)) {
@@ -143,7 +148,7 @@ export function buildInviteCommand(ctx: AppContext): Command {
                 // 3. Build embed.
                 const guildLocale = ctx.repos.guildConfig.getOrDefault(guild.id).locale;
                 const embed = new EmbedBuilder()
-                    .setColor(INVITE_EMBED_COLOR)
+                    .setColor(EMBED_COLORS.invite)
                     .setTitle(t('invite.embed_title', { username: user.username }, guildLocale))
                     .setDescription(t('invite.embed_description', { guild_name: guild.name }, guildLocale))
                     .addFields(

@@ -4,10 +4,6 @@ export function hasManageGuild(guild: Guild): boolean {
     return guild.members.me?.permissions.has(PermissionFlagsBits.ManageGuild) ?? false;
 }
 
-export function hasManageRoles(guild: Guild): boolean {
-    return guild.members.me?.permissions.has(PermissionFlagsBits.ManageRoles) ?? false;
-}
-
 export type AssignRoleResult =
     | { ok: true }
     | { ok: false; reason: 'bot-not-cached' | 'no-manage-roles' | 'role-managed' | 'role-everyone' | 'role-above-bot' };

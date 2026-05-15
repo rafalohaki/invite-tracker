@@ -1,16 +1,14 @@
 import type { Guild } from 'discord.js';
+import { INITIAL_VALIDATION_DELAY_MS, MEMBER_FETCH_CHUNK_SIZE, ROLE_ASSIGN_THROTTLE_MS } from '@/config/constants.ts';
 import { env } from '@/config/env.ts';
 import type { BulkValidationUpdate } from '@/db/repositories/tracked-joins.ts';
-import { assignEligibleRoles, ROLE_ASSIGN_THROTTLE_MS } from '@/services/role-rewards.ts';
+import { assignEligibleRoles } from '@/services/role-rewards.ts';
 import type { AppClient, AppContext } from '@/types/discord.ts';
 import { isUnknownMemberOrUser } from '@/utils/discord-errors.ts';
 import { logError, logInfo, logWarn } from '@/utils/logger.ts';
 import { isoNow } from '@/utils/time.ts';
 
 type PresenceStatus = 'present' | 'left' | 'error_skip';
-
-const INITIAL_VALIDATION_DELAY_MS = 2 * 60 * 1000; // 2 min after ready
-const MEMBER_FETCH_CHUNK_SIZE = 100; // Discord API limit
 
 /**
  * Resolve {userId → presence} for many users in one (or few) batched fetch(es).

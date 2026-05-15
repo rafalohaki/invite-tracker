@@ -1,4 +1,5 @@
 import { Events } from 'discord.js';
+import { INVITE_FETCH_DELAY_MS } from '@/config/constants.ts';
 import { detectRejoin } from '@/services/anti-cheat.ts';
 import { findUsedInviteAndStale } from '@/services/invite-attribution.ts';
 import { cacheGuildInvites, ensureCachedUses, fetchInvitesSafe } from '@/services/invite-cache.ts';
@@ -7,8 +8,6 @@ import type { AppClient, AppContext } from '@/types/discord.ts';
 import { ensureFullMemberData } from '@/utils/discord-members.ts';
 import { logError, logInfo, logWarn } from '@/utils/logger.ts';
 import { hasManageGuild } from '@/utils/permissions.ts';
-
-const INVITE_FETCH_DELAY_MS = 2500;
 
 export function registerGuildMemberAdd(client: AppClient, ctx: AppContext): void {
     client.on(Events.GuildMemberAdd, async (rawMember) => {

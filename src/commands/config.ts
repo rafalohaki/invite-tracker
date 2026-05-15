@@ -1,4 +1,5 @@
 import {
+    ApplicationIntegrationType,
     type AutocompleteInteraction,
     type ChatInputCommandInteraction,
     EmbedBuilder,
@@ -8,12 +9,11 @@ import {
     SlashCommandBuilder,
 } from 'discord.js';
 import { z } from 'zod';
+import { EMBED_COLORS } from '@/config/constants.ts';
 import { CONFIG_KEYS, type ConfigKey } from '@/db/repositories/guild-config.ts';
 import { t } from '@/i18n/translator.ts';
 import type { AppContext, Command } from '@/types/discord.ts';
 import { logError, logInfo, logWarn } from '@/utils/logger.ts';
-
-const CONFIG_EMBED_COLOR = 0x5865f2;
 
 const SNOWFLAKE = /^\d{17,20}$/;
 
@@ -34,6 +34,7 @@ export function buildConfigCommand(ctx: AppContext): Command {
         .setName('config')
         .setDescription('Per-guild bot configuration (admin only).')
         .setContexts(InteractionContextType.Guild)
+        .setIntegrationTypes(ApplicationIntegrationType.GuildInstall)
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
         .addSubcommand((s) => s.setName('get').setDescription('Show the current per-guild configuration.'))
         .addSubcommand((s) =>
@@ -75,7 +76,7 @@ export function buildConfigCommand(ctx: AppContext): Command {
                 if (sub === 'get') {
                     const cfg = ctx.repos.guildConfig.getOrDefault(guild.id);
                     const embed = new EmbedBuilder()
-                        .setColor(CONFIG_EMBED_COLOR)
+                        .setColor(EMBED_COLORS.config)
                         .setTitle(`Configuration for ${guild.name}`)
                         .addFields(
                             {

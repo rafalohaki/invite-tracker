@@ -1,17 +1,19 @@
 import {
+    ApplicationIntegrationType,
     type ChatInputCommandInteraction,
     EmbedBuilder,
     type Guild,
     GuildMember,
+    InteractionContextType,
     SlashCommandBuilder,
 } from 'discord.js';
+import { EMBED_COLORS } from '@/config/constants.ts';
 import { t } from '@/i18n/translator.ts';
 import { buildLeaderboardRow, LEADERBOARD_PAGE_SIZE } from '@/interactions/leaderboard-buttons.ts';
 import type { LeaderboardPeriod } from '@/types/db.ts';
 import type { AppContext, Command } from '@/types/discord.ts';
+import { isUnknownMemberOrUser } from '@/utils/discord-errors.ts';
 import { logError, logInfo, logWarn } from '@/utils/logger.ts';
-
-const LEADERBOARD_EMBED_COLOR = 0xffd700;
 
 const PERIOD_LABEL: Record<LeaderboardPeriod, string> = {
     all: 'All time',
@@ -54,7 +56,7 @@ export async function renderLeaderboardPage(
                 const member = await guild.members.fetch(entry.inviterId);
                 if (member instanceof GuildMember) displayName = member.displayName;
             } catch (err) {
-                if (typeof err === 'object' && err && 'code' in err && (err.code === 10007 || err.code === 10013)) {
+                if (isUnknownMemberOrUser(err)) {
                     displayName = t('leaderboard.left_user_format', { userId: entry.inviterId }, guildLocale);
                 } else {
                     logWarn(`${logPrefix} Failed to fetch inviter ${entry.inviterId}:`, err);
@@ -70,7 +72,7 @@ export async function renderLeaderboardPage(
     }
 
     const embed = new EmbedBuilder()
-        .setColor(LEADERBOARD_EMBED_COLOR)
+        .setColor(EMBED_COLORS.leaderboard)
         .setTitle(t('leaderboard.embed_title', { guild_name: guild.name }, guildLocale))
         .setDescription(description)
         .setFooter({
@@ -87,6 +89,8 @@ export function buildLeaderboardCommand(ctx: AppContext): Command {
         data: new SlashCommandBuilder()
             .setName('leaderboard')
             .setDescription('Top inviters in this server (validated joins).')
+            .setContexts(InteractionContextType.Guild)
+            .setIntegrationTypes(ApplicationIntegrationType.GuildInstall)
             .addStringOption((o) =>
                 o
                     .setName('period')

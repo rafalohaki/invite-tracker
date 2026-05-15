@@ -3,9 +3,6 @@ import type { AppContext } from '@/types/discord.ts';
 import { logError, logInfo, logWarn } from '@/utils/logger.ts';
 import { canAssignRole } from '@/utils/permissions.ts';
 
-/** Soft throttle between members to stay friendly with Discord's role-update rate limit. */
-export const ROLE_ASSIGN_THROTTLE_MS = 1500;
-
 export interface AssignmentReport {
     added: string[];
     skipped: { roleId: string; reason: string }[];
