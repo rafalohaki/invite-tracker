@@ -1,4 +1,5 @@
 import { Events } from 'discord.js';
+import { detectRejoin } from '@/services/anti-cheat.ts';
 import { findUsedInviteAndStale } from '@/services/invite-attribution.ts';
 import { cacheGuildInvites, ensureCachedUses, fetchInvitesSafe } from '@/services/invite-cache.ts';
 import { sendWelcomeMessage } from '@/services/welcome.ts';
@@ -68,36 +69,57 @@ export function registerGuildMemberAdd(client: AppClient, ctx: AppContext): void
                 }
             }
 
-            // 5. Always record JoinHistory (with or without attribution).
-            ctx.repos.joinHistory.record(
+            // 5. Always record JoinHistory (with or without attribution). Capture id for potential flagging.
+            const joinHistoryId = ctx.repos.joinHistory.record(
                 guild.id,
                 user.id,
                 attribution?.inviterId ?? null,
                 attribution?.inviteCode ?? null,
             );
 
-            // 6. If we attributed, create the pending TrackedJoin and send the welcome message.
-            //    Anti-cheat lands in PR #9; for now every attributed join is treated as legitimate.
+            // 6. If we attributed, run anti-cheat; flagged rejoins skip TrackedJoin/welcome.
             if (attribution) {
-                ctx.repos.trackedJoins.upsertPending(guild.id, user.id, attribution.inviterId, attribution.inviteCode);
-                logInfo(
-                    `${prefix} Recorded pending TrackedJoin (inviter ${attribution.inviterId}, code ${attribution.inviteCode}).`,
-                );
+                const cfg = ctx.repos.guildConfig.getOrDefault(guild.id);
+                const verdict = detectRejoin(ctx, guild.id, user.id, attribution.inviterId, cfg.anti_cheat_window_days);
 
-                // Send welcome message (best effort — fetch inviter as a User, not a member of THIS guild,
-                // so we still mention them even if they since left).
-                try {
-                    const inviterUser = await client.users.fetch(attribution.inviterId).catch(() => null);
-                    if (inviterUser) {
-                        const validatedCount = ctx.repos.trackedJoins.countByStatus(
-                            guild.id,
-                            attribution.inviterId,
-                            'validated',
-                        );
-                        await sendWelcomeMessage(ctx, guild, member, inviterUser, validatedCount);
+                if (verdict.isSuspicious) {
+                    logWarn(
+                        `${prefix} Anti-cheat flag: ${user.id} previously invited by ${verdict.previousInviterId}, now by ${attribution.inviterId} within ${cfg.anti_cheat_window_days}d.`,
+                    );
+                    ctx.repos.trackedJoins.upsertWithStatus(
+                        guild.id,
+                        user.id,
+                        attribution.inviterId,
+                        attribution.inviteCode,
+                        'flagged',
+                    );
+                    ctx.repos.joinHistory.flagAsRejoin(joinHistoryId);
+                } else {
+                    ctx.repos.trackedJoins.upsertPending(
+                        guild.id,
+                        user.id,
+                        attribution.inviterId,
+                        attribution.inviteCode,
+                    );
+                    logInfo(
+                        `${prefix} Recorded pending TrackedJoin (inviter ${attribution.inviterId}, code ${attribution.inviteCode}).`,
+                    );
+
+                    // Send welcome message (best effort — fetch inviter as a User, not a member of THIS guild,
+                    // so we still mention them even if they since left).
+                    try {
+                        const inviterUser = await client.users.fetch(attribution.inviterId).catch(() => null);
+                        if (inviterUser) {
+                            const validatedCount = ctx.repos.trackedJoins.countByStatus(
+                                guild.id,
+                                attribution.inviterId,
+                                'validated',
+                            );
+                            await sendWelcomeMessage(ctx, guild, member, inviterUser, validatedCount);
+                        }
+                    } catch (err) {
+                        logError(`${prefix} Welcome message dispatch failed:`, err);
                     }
-                } catch (err) {
-                    logError(`${prefix} Welcome message dispatch failed:`, err);
                 }
             }
 

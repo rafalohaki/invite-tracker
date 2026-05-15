@@ -66,6 +66,7 @@ export function buildCheckCommand(ctx: AppContext): Command {
                 const inviteCode = userInvite?.inviteCode ?? null;
                 const validated = ctx.repos.trackedJoins.countByStatus(guild.id, targetId, 'validated');
                 const pending = ctx.repos.trackedJoins.countByStatus(guild.id, targetId, 'pending');
+                const flagged = ctx.repos.joinHistory.getFlaggedForUser(guild.id, targetId);
 
                 const embed = new EmbedBuilder()
                     .setColor(CHECK_EMBED_COLOR)
@@ -97,6 +98,18 @@ export function buildCheckCommand(ctx: AppContext): Command {
                     )
                     .setFooter({ text: t('check.footer_success', { admin_tag: user.username }, guildLocale) })
                     .setTimestamp();
+
+                if (flagged.length > 0) {
+                    const lines = flagged.slice(0, 5).map((row) => {
+                        const inviter = row.inviterId ? `<@${row.inviterId}>` : '_(unknown inviter)_';
+                        return `• \`${row.joinTimestamp}\` — invited by ${inviter}`;
+                    });
+                    const more = flagged.length > 5 ? `\n…and ${flagged.length - 5} more.` : '';
+                    embed.addFields({
+                        name: `Rejoin history (flagged: ${flagged.length})`,
+                        value: `${lines.join('\n')}${more}`,
+                    });
+                }
 
                 if (targetUser.avatar) embed.setThumbnail(targetUser.displayAvatarURL());
                 await interaction.editReply({ embeds: [embed] });
