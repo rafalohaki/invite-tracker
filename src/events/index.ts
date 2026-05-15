@@ -6,10 +6,11 @@ import { registerGuildDelete } from './guild-delete.ts';
 import { registerGuildMemberAdd } from './guild-member-add.ts';
 import { registerGuildMemberRemove } from './guild-member-remove.ts';
 import { registerInteractionCreate } from './interaction-create.ts';
-import { registerReady } from './ready.ts';
+import { type ReadyHandles, registerReady } from './ready.ts';
 
-export function registerEvents(client: AppClient, ctx: AppContext): void {
-    registerReady(client);
+export function registerEvents(client: AppClient, ctx: AppContext): ReadyHandles {
+    const handles: ReadyHandles = { cancelValidation: () => {} };
+    registerReady(client, ctx, handles);
     registerInteractionCreate(client);
     registerGuildCreate(client);
     registerGuildDelete(client, ctx);
@@ -18,4 +19,6 @@ export function registerEvents(client: AppClient, ctx: AppContext): void {
 
     client.on(Events.Warn, (warning) => logWarn('[Discord Client Warn]', warning));
     client.on(Events.Error, (error) => logError('[Discord Client Error]', error));
+
+    return handles;
 }

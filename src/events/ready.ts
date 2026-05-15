@@ -1,10 +1,15 @@
 import { ActivityType, Events } from 'discord.js';
 import { t } from '@/i18n/translator.ts';
 import { cacheGuildInvites } from '@/services/invite-cache.ts';
-import type { AppClient } from '@/types/discord.ts';
+import { startValidationScheduler } from '@/services/validation.ts';
+import type { AppClient, AppContext } from '@/types/discord.ts';
 import { logError, logInfo } from '@/utils/logger.ts';
 
-export function registerReady(client: AppClient): void {
+export interface ReadyHandles {
+    cancelValidation: () => void;
+}
+
+export function registerReady(client: AppClient, ctx: AppContext, handles: ReadyHandles): void {
     client.once(Events.ClientReady, async (readyClient) => {
         try {
             logInfo(`Logged in as ${readyClient.user.tag} (id ${readyClient.user.id})`);
@@ -27,6 +32,9 @@ export function registerReady(client: AppClient): void {
                 await new Promise((r) => setTimeout(r, 300));
             }
             logInfo(`[Ready] Initial caching done: ${ok} ok, ${failed} failed/no-perm.`);
+
+            const interval = startValidationScheduler(client, ctx);
+            handles.cancelValidation = () => clearInterval(interval);
         } catch (err) {
             logError('[Ready] Critical error during init:', err);
         }

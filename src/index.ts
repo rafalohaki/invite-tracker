@@ -39,7 +39,7 @@ const client = createClient();
 for (const command of buildCommands(ctx)) {
     client.commands.set(command.data.name, command);
 }
-registerEvents(client, ctx);
+const eventHandles = registerEvents(client, ctx);
 
 // Graceful shutdown.
 let shuttingDown = false;
@@ -47,6 +47,12 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     logInfo(`Received ${signal}. Shutting down gracefully…`);
+    try {
+        eventHandles.cancelValidation();
+        logInfo('Validation scheduler stopped.');
+    } catch (err) {
+        logError('Failed to stop validation scheduler:', err);
+    }
     try {
         client.destroy();
         logInfo('Discord client destroyed.');

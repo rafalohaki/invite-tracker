@@ -18,6 +18,7 @@ export class TrackedJoinsRepository {
     private readonly stmtUpsert;
     private readonly stmtMarkLeftEarly;
     private readonly stmtFindCandidates;
+    private readonly stmtFindCandidatesForGuild;
     private readonly stmtBulkUpdate;
     private readonly stmtCountByStatus;
     private readonly stmtLeaderboardAll;
@@ -47,6 +48,9 @@ export class TrackedJoinsRepository {
         );
         this.stmtFindCandidates = db.query<TrackedJoinRow, [string]>(
             "SELECT * FROM TrackedJoins WHERE status = 'pending' AND joinTimestamp <= ?",
+        );
+        this.stmtFindCandidatesForGuild = db.query<TrackedJoinRow, [string, string]>(
+            "SELECT * FROM TrackedJoins WHERE guildId = ? AND status = 'pending' AND joinTimestamp <= ?",
         );
         this.stmtBulkUpdate = db.prepare<
             unknown,
@@ -103,6 +107,11 @@ export class TrackedJoinsRepository {
 
     findCandidatesForValidation(cutoffIso: string): TrackedJoinRow[] {
         return this.stmtFindCandidates.all(cutoffIso);
+    }
+
+    /** Per-guild scan — cleaner when callers want to apply per-guild validation_period_days. */
+    findCandidatesForGuild(guildId: string, cutoffIso: string): TrackedJoinRow[] {
+        return this.stmtFindCandidatesForGuild.all(guildId, cutoffIso);
     }
 
     bulkUpdateStatus(updates: readonly BulkValidationUpdate[]): void {
