@@ -3,10 +3,14 @@ import { env } from '@/config/env.ts';
 const LOG_LEVELS = { DEBUG: 1, INFO: 2, WARN: 3, ERROR: 4 } as const;
 type LogLevelName = keyof typeof LOG_LEVELS;
 
-const activeLevel: number = LOG_LEVELS[env.LOG_LEVEL];
+let cachedLevel: number | undefined;
+function activeLevel(): number {
+    cachedLevel ??= LOG_LEVELS[env.LOG_LEVEL];
+    return cachedLevel;
+}
 
 function shouldLog(level: LogLevelName): boolean {
-    return activeLevel <= LOG_LEVELS[level];
+    return activeLevel() <= LOG_LEVELS[level];
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: logger accepts any printable argument
@@ -26,4 +30,6 @@ export const logError = (...args: any[]): void => {
     if (shouldLog('ERROR')) console.error('[ERROR]', ...args);
 };
 
-export const configuredLogLevel: LogLevelName = env.LOG_LEVEL;
+export function configuredLogLevel(): LogLevelName {
+    return env.LOG_LEVEL;
+}

@@ -2,7 +2,7 @@ import { env } from '@/config/env.ts';
 import { configuredLogLevel, logInfo } from '@/utils/logger.ts';
 
 logInfo('bot starting');
-logInfo(`[Config] Log Level: ${configuredLogLevel}`);
+logInfo(`[Config] Log Level: ${configuredLogLevel()}`);
 logInfo(`[Config] Database: ${env.DATABASE_PATH}`);
 logInfo(`[Config] Locale: ${env.LOCALE_LANG}`);
 logInfo(

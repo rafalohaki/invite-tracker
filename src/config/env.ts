@@ -38,15 +38,38 @@ const envSchema = z.object({
 
 export type Env = z.infer<typeof envSchema>;
 
+let cached: Env | undefined;
+
+/**
+ * Parse process.env on first access. Fail-fast in production (`bun src/index.ts`
+ * touches env at boot); lazy means test code that never reads env (repository tests,
+ * pure unit tests) can run without requiring DISCORD_TOKEN/CLIENT_ID.
+ */
 function parseEnv(): Env {
     const result = envSchema.safeParse(process.env);
     if (!result.success) {
         const issues = result.error.issues.map((i) => `  - ${i.path.join('.') || '(root)'}: ${i.message}`).join('\n');
-        // eslint-disable-next-line no-console -- logger isn't loaded yet at env-parse time
         console.error(`FATAL: Invalid environment variables:\n${issues}`);
         process.exit(1);
     }
     return result.data;
 }
 
-export const env: Env = parseEnv();
+export const env: Env = new Proxy({} as Env, {
+    get(_target, key: string) {
+        cached ??= parseEnv();
+        return cached[key as keyof Env];
+    },
+    has(_target, key: string) {
+        cached ??= parseEnv();
+        return key in cached;
+    },
+    ownKeys() {
+        cached ??= parseEnv();
+        return Reflect.ownKeys(cached);
+    },
+    getOwnPropertyDescriptor(_target, key: string) {
+        cached ??= parseEnv();
+        return Reflect.getOwnPropertyDescriptor(cached, key);
+    },
+});
