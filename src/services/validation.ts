@@ -1,6 +1,7 @@
 import type { Guild } from 'discord.js';
 import { env } from '@/config/env.ts';
 import type { BulkValidationUpdate } from '@/db/repositories/tracked-joins.ts';
+import { assignEligibleRoles, ROLE_ASSIGN_THROTTLE_MS } from '@/services/role-rewards.ts';
 import type { AppClient, AppContext } from '@/types/discord.ts';
 import { isUnknownMemberOrUser } from '@/utils/discord-errors.ts';
 import { logError, logInfo, logWarn } from '@/utils/logger.ts';
@@ -112,6 +113,26 @@ export async function runValidation(client: AppClient, ctx: AppContext): Promise
             ctx.repos.trackedJoins.bulkUpdateStatus(bulkOps);
         } catch (err) {
             logError(`${guildPrefix} Failed validation pass:`, err);
+        }
+    }
+
+    // Role-reward sweep: for every inviter whose validated count just changed,
+    // grant any reward whose threshold is now satisfied. One bulk role.add per
+    // inviter, with a soft throttle between inviters so we don't hit the
+    // per-guild "10 role updates / 10s" rate limit on a busy run.
+    for (const [guildId, inviterIds] of promotedByInviter.entries()) {
+        const guild = client.guilds.cache.get(guildId);
+        if (!guild) continue;
+        for (const inviterId of inviterIds) {
+            try {
+                const inviter = await guild.members.fetch(inviterId).catch(() => null);
+                if (!inviter) continue;
+                const count = ctx.repos.trackedJoins.countByStatus(guildId, inviterId, 'validated');
+                await assignEligibleRoles(ctx, guild, inviter, count);
+            } catch (err) {
+                logError(`[ValidationTask][Guild:${guildId}][Inviter:${inviterId}] Role assignment failed:`, err);
+            }
+            await new Promise((resolve) => setTimeout(resolve, ROLE_ASSIGN_THROTTLE_MS));
         }
     }
 
