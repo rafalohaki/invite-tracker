@@ -31,7 +31,8 @@ function initDB() {
             )
         `);
 
-        // Table for tracking joins
+        // Table for tracking joins. UNIQUE(guildId, inviteeId) is required for the
+        // ON CONFLICT clause in upsertPending — keep it as part of the table definition.
         db.run(`
             CREATE TABLE IF NOT EXISTS TrackedJoins (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -44,14 +45,17 @@ function initDB() {
                 validationTimestamp DATETIME,
                 leaveTimestamp DATETIME,
                 createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-                updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+                updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (guildId, inviteeId)
             )
         `);
 
-        // Indexes for performance
+        // Indexes for performance.
         db.run('CREATE INDEX IF NOT EXISTS idx_joins_guild_invitee ON TrackedJoins(guildId, inviteeId)');
         db.run('CREATE INDEX IF NOT EXISTS idx_joins_validation ON TrackedJoins(guildId, status, joinTimestamp)');
         db.run('CREATE INDEX IF NOT EXISTS idx_user_invites_code ON UserInvites(inviteCode)');
+        // Backward-compat for databases created before UNIQUE was inlined into TrackedJoins.
+        db.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_join ON TrackedJoins(guildId, inviteeId)');
 
         logInfo('SQLite Database initialized successfully.');
     } catch (err) {
@@ -128,13 +132,6 @@ const dbInterface = {
                     leaveTimestamp = NULL
             `, [guildId, inviteeId, inviterId, inviteCode, now]);
         },
-        // Wait, SQLite doesn't have a direct conflict on (guildId, inviteeId) unless we add a unique index
-        // Let's ensure the unique index exists for the upsert to work.
-        addUniqueConstraint: () => {
-            try {
-                db.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_join ON TrackedJoins(guildId, inviteeId)');
-            } catch (e) { }
-        },
         markLeftEarly: (guildId, inviteeId) => {
             const now = new Date().toISOString();
             return db.run(`
@@ -169,20 +166,23 @@ const dbInterface = {
         },
         getLeaderboard: (guildId, limit) => {
             return db.query(`
-                SELECT inviterId as _id, COUNT(*) as count 
-                FROM TrackedJoins 
-                WHERE guildId = ? AND status = 'validated' 
-                GROUP BY inviterId 
-                ORDER BY count DESC 
+                SELECT inviterId, COUNT(*) as count
+                FROM TrackedJoins
+                WHERE guildId = ? AND status = 'validated'
+                GROUP BY inviterId
+                ORDER BY count DESC
                 LIMIT ?
             `).all(guildId, limit);
         },
         deleteAllInGuild: (guildId) => {
             return db.run('DELETE FROM TrackedJoins WHERE guildId = ?', [guildId]);
         }
-    }
-};
+    },
 
-dbInterface.trackedJoins.addUniqueConstraint();
+    /**
+     * Closes the SQLite connection. Call on graceful shutdown to flush WAL/SHM.
+     */
+    close: () => db.close()
+};
 
 module.exports = dbInterface;

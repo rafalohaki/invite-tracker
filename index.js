@@ -13,7 +13,7 @@
 require('dotenv').config();
 const fs = require('node:fs');
 const path = require('node:path');
-const { Client, GatewayIntentBits, Collection, Events, Partials, DiscordAPIError, PermissionsBitField, ActivityType } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, Events, Partials, DiscordAPIError, PermissionsBitField, ActivityType, MessageFlags } = require('discord.js');
 const db = require('./database/db');
 const config = require('./config');
 const { loadTranslations, t } = require('./utils/translator');
@@ -25,7 +25,6 @@ loadTranslations();
 // --- Configuration & Constants ---
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
-const MONGODB_URI = process.env.MONGODB_URI;
 const PERFORM_GUILD_DELETE_CLEANUP = process.env.PERFORM_GUILD_DELETE_CLEANUP === 'true';
 
 const validationPeriodDays = parseInt(process.env.VALIDATION_PERIOD_DAYS || config.defaultValidationPeriodDays || 7, 10);
@@ -278,7 +277,7 @@ function _checkSingleInvite(userInvite, currentInvites, cachedUses, logPrefix) {
  */
 function _findUsedInviteAndStale(currentInvites, cachedUses, trackedUserInvites, logPrefix) {
     let attribution = null;
-    const staleInviteIds = []; // Store DB IDs (_id) of invites to delete
+    const staleInviteIds = []; // Store inviteCode values of stale invites to delete
     const potentialAttributions = []; // Store invites with increased usage
 
     if (!currentInvites) {
@@ -331,7 +330,7 @@ function _findUsedInviteAndStale(currentInvites, cachedUses, trackedUserInvites,
 
 /**
  * Deletes stale UserInvite records from the database.
- * @param {string[]} staleInviteIds - Array of UserInvite document IDs (_id) to delete.
+ * @param {string[]} staleInviteIds - Array of UserInvite inviteCode values to delete.
  * @param {string} guildId - The guild ID for context.
  * @param {string} logPrefix - Prefix for logging.
  */
@@ -534,7 +533,7 @@ client.on(Events.InteractionCreate, async interaction => {
         logError(`${logPrefix} No command matching '${interaction.commandName}' was found.`);
         try {
             // Use the translator attached to the client
-            await interaction.reply({ content: interaction.client.t('general.error_unknown_command'), ephemeral: true });
+            await interaction.reply({ content: interaction.client.t('general.error_unknown_command'), flags: MessageFlags.Ephemeral });
         } catch (replyError) {
             // Log error if replying itself fails
             logError(`${logPrefix} Failed to reply to unknown command interaction:`, replyError);
@@ -551,9 +550,9 @@ client.on(Events.InteractionCreate, async interaction => {
         try {
             // Try to inform the user, checking interaction state
             if (interaction.replied || interaction.deferred) {
-                await interaction.followUp({ content: errorMessage, ephemeral: true });
+                await interaction.followUp({ content: errorMessage, flags: MessageFlags.Ephemeral });
             } else {
-                await interaction.reply({ content: errorMessage, ephemeral: true });
+                await interaction.reply({ content: errorMessage, flags: MessageFlags.Ephemeral });
             }
         } catch (replyError) {
             logError(`${logPrefix} Failed to send command execution error reply to user:`, replyError);
@@ -694,8 +693,9 @@ async function _checkMemberPresence(join, cache, logPrefixVal) {
     }
 
     try {
-        // Fetch member - force=false uses cache first, then API if needed. Efficient.
-        await guild.members.fetch({ user: join.inviteeId, force: false });
+        // force=true: bypass cache so we don't validate a user the cache still thinks is present.
+        // Cost: one API call per pending candidate during the periodic check (runs every 60 min).
+        await guild.members.fetch({ user: join.inviteeId, force: true });
         logDebug(`${logPrefixVal} Member ${join.inviteeId}@${join.guildId} is present.`);
         cache.set(memberCacheKey, { status: 'present', guild });
         return { status: 'present', guild };
@@ -715,12 +715,12 @@ async function _checkMemberPresence(join, cache, logPrefixVal) {
 }
 
 /**
- * Prepares the update operation object for MongoDB bulkWrite based on member presence status.
- * @param {object} join - The lean TrackedJoin document.
+ * Prepares the update payload for the SQLite bulk transaction based on member presence status.
+ * @param {object} join - The TrackedJoin row from SQLite.
  * @param {'present'|'left'} memberStatus - The status from _checkMemberPresence.
  * @param {Date} eventTime - The timestamp for the validation or leave event.
  * @param {string} logPrefixVal - Logging prefix specific to validation task.
- * @returns {object|null} - The `updateOne` operation object for bulkWrite, or null if status invalid.
+ * @returns {object|null} - The update payload for db.trackedJoins.bulkUpdateStatus, or null if status invalid.
  */
 function _prepareValidationUpdate(join, memberStatus, eventTime, logPrefixVal) {
     let updateOp = { id: join.id };
@@ -769,7 +769,7 @@ async function validatePendingJoins() {
 
             // Skip if there was an error fetching guild/member info for this join
             if (presenceResult.status === 'error_skip') {
-                logWarn(`${logPrefix} Skipping Join ID ${join._id} due to error during presence check.`);
+                logWarn(`${logPrefix} Skipping Join ID ${join.id} due to error during presence check.`);
                 continue;
             }
 
@@ -879,6 +879,13 @@ async function shutdown(signal) {
         logInfo('Discord client destroyed.');
     } else {
         logInfo('Discord client already destroyed or unavailable.');
+    }
+
+    try {
+        db.close();
+        logInfo('SQLite database closed.');
+    } catch (dbCloseError) {
+        logError('Failed to close SQLite database cleanly:', dbCloseError);
     }
 
     logInfo('Exiting process.');

@@ -1,12 +1,12 @@
 /**
  * @file commands/leaderboard.js
  * @description Slash command to display the top inviters based on validated joins (users who stayed > 1 week).
- * Uses MongoDB aggregation for efficient data retrieval.
+ * Uses SQLite GROUP BY aggregation for efficient data retrieval.
  */
 
 'use strict';
 
-const { SlashCommandBuilder, EmbedBuilder, GuildMember } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, GuildMember, MessageFlags } = require('discord.js');
 const db = require('../database/db');
 const config = require('../config');
 const { logDebug, logInfo, logWarn, logError } = require('../utils/logger');
@@ -23,7 +23,7 @@ module.exports = {
         const t = interaction.client.t;
 
         if (!guild) {
-            return interaction.reply({ content: t('general.error_guild_only'), ephemeral: true });
+            return interaction.reply({ content: t('general.error_guild_only'), flags: MessageFlags.Ephemeral });
         }
 
         await interaction.deferReply();
@@ -38,7 +38,7 @@ module.exports = {
 
             if (!leaderboardData || leaderboardData.length === 0) {
                 logInfo(`${logPrefix} No validated invites found in DB.`);
-                return interaction.editReply({ content: t('leaderboard.no_data'), ephemeral: true });
+                return interaction.editReply({ content: t('leaderboard.no_data') });
             }
             logInfo(`${logPrefix} Found ${leaderboardData.length} leaderboard entries.`);
 
@@ -47,26 +47,25 @@ module.exports = {
             const leaderboardEntries = [];
 
             for (const entry of leaderboardData) {
-                let displayName = t('leaderboard.unknown_user_format', { userId: entry._id });
+                let displayName = t('leaderboard.unknown_user_format', { userId: entry.inviterId });
 
                 try {
-                    const member = await guild.members.fetch(entry._id);
+                    const member = await guild.members.fetch(entry.inviterId);
                     if (member instanceof GuildMember) {
-                        // Use server nickname > global display name > username (avoids deprecated .tag)
                         displayName = member.displayName;
                     } else {
-                        logWarn(`${logPrefix} Fetched data for ID ${entry._id} was not a GuildMember.`);
+                        logWarn(`${logPrefix} Fetched data for ID ${entry.inviterId} was not a GuildMember.`);
                     }
                 } catch (fetchError) {
                     if (fetchError.code === 10007 || fetchError.code === 10013) {
-                        logWarn(`${logPrefix} Inviter ${entry._id} not found in guild (likely left).`);
-                        displayName = t('leaderboard.left_user_format', { userId: entry._id });
+                        logWarn(`${logPrefix} Inviter ${entry.inviterId} not found in guild (likely left).`);
+                        displayName = t('leaderboard.left_user_format', { userId: entry.inviterId });
                     } else {
-                        logError(`${logPrefix} Error fetching member ${entry._id}:`, fetchError);
+                        logError(`${logPrefix} Error fetching member ${entry.inviterId}:`, fetchError);
                     }
                 }
 
-                leaderboardEntries.push({ userId: entry._id, displayName, count: entry.count });
+                leaderboardEntries.push({ userId: entry.inviterId, displayName, count: entry.count });
             }
 
             // --- Step 3: Build the Leaderboard Embed ---
@@ -100,7 +99,7 @@ module.exports = {
             logError(`${logPrefix} Critical error in execute block:`, error);
             const userErrorMessage = t('leaderboard.error_critical');
             if (interaction.deferred || interaction.replied) {
-                await interaction.editReply({ content: userErrorMessage, ephemeral: true });
+                await interaction.followUp({ content: userErrorMessage, flags: MessageFlags.Ephemeral });
             }
         }
     },

@@ -7,7 +7,7 @@
 
 'use strict';
 
-const { SlashCommandBuilder, EmbedBuilder, PermissionsBitField, DiscordAPIError, ChannelType } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, PermissionsBitField, DiscordAPIError, ChannelType, MessageFlags } = require('discord.js');
 const db = require('../database/db');
 const config = require('../config');
 const { logDebug, logInfo, logWarn, logError } = require('../utils/logger');
@@ -157,7 +157,7 @@ async function _getOrCreateInvite(interaction, guildId, userId, logPrefix, t) {
 
         const targetChannel = _resolveInviteChannel(channel, logPrefix);
         if (!targetChannel) {
-            await interaction.editReply({ content: t('invite.error_invalid_channel_type'), ephemeral: true });
+            await interaction.editReply({ content: t('invite.error_invalid_channel_type'), flags: MessageFlags.Ephemeral });
             return null;
         }
 
@@ -166,9 +166,9 @@ async function _getOrCreateInvite(interaction, guildId, userId, logPrefix, t) {
             const botMember = guild.members.me;
             const channelPermissions = botMember ? targetChannel.permissionsFor(botMember) : null;
             if (!channelPermissions?.has(PermissionsBitField.Flags.CreateInstantInvite)) {
-                await interaction.editReply({ content: t('invite.error_permission_create', { channel_name: targetChannel.name }), ephemeral: true });
+                await interaction.editReply({ content: t('invite.error_permission_create', { channel_name: targetChannel.name }), flags: MessageFlags.Ephemeral });
             } else {
-                await interaction.editReply({ content: t('invite.error_failed_create_save'), ephemeral: true });
+                await interaction.editReply({ content: t('invite.error_failed_create_save'), flags: MessageFlags.Ephemeral });
             }
             return null;
         }
@@ -176,7 +176,7 @@ async function _getOrCreateInvite(interaction, guildId, userId, logPrefix, t) {
         // 4. Save the new invite to the database
         const saved = await _saveInviteToDatabase(guildId, userId, newInvite.code, logPrefix);
         if (!saved) {
-            await interaction.editReply({ content: t('invite.error_failed_create_save'), ephemeral: true });
+            await interaction.editReply({ content: t('invite.error_failed_create_save'), flags: MessageFlags.Ephemeral });
             return null;
         }
         inviteCode = newInvite.code;
@@ -246,16 +246,16 @@ module.exports = {
         // --- 1. Initial Validation ---
         if (!guild || !channel) {
             logWarn(`${logPrefix} Command used outside of a guild channel.`);
-            return interaction.reply({ content: t('general.error_guild_only'), ephemeral: true });
+            return interaction.reply({ content: t('general.error_guild_only'), flags: MessageFlags.Ephemeral });
         }
 
         // --- 2. Defer Reply ---
         try {
-            await interaction.deferReply({ ephemeral: true });
+            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         } catch (deferError) {
             logError(`${logPrefix} Failed to defer reply:`, deferError);
             try {
-                await interaction.reply({ content: t('invite.error_start_command'), ephemeral: true });
+                await interaction.reply({ content: t('invite.error_start_command'), flags: MessageFlags.Ephemeral });
             } catch { /* interaction likely expired */ }
             return;
         }
@@ -281,9 +281,9 @@ module.exports = {
             const userErrorMessage = t('invite.error_critical', { error_message: error.message || 'Unknown error' });
             try {
                 if (interaction.deferred && !interaction.replied) {
-                    await interaction.editReply({ content: userErrorMessage, embeds: [], ephemeral: true });
+                    await interaction.editReply({ content: userErrorMessage, embeds: [], flags: MessageFlags.Ephemeral });
                 } else {
-                    await interaction.followUp({ content: userErrorMessage, ephemeral: true });
+                    await interaction.followUp({ content: userErrorMessage, flags: MessageFlags.Ephemeral });
                 }
             } catch (editError) {
                 logError(`${logPrefix} Failed to send error reply:`, editError);

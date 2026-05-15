@@ -6,10 +6,10 @@
 
 'use strict';
 
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags, InteractionContextType } = require('discord.js');
 const db = require('../database/db');
 const config = require('../config');
-const { logDebug, logInfo, logWarn, logError } = require('../utils/logger');
+const { logInfo, logWarn, logError } = require('../utils/logger');
 
 const CHECK_COMMAND_CONFIG = config.inviteCommand;
 
@@ -30,17 +30,17 @@ async function _validateAdminContext(interaction, logPrefix) {
 
     if (ADMIN_IDS.length === 0) {
         logWarn(`${logPrefix} Attempted use, but ADMIN_IDS is not set or empty in .env.`);
-        await interaction.reply({ content: t('check.error_admin_id_not_set'), ephemeral: true });
+        await interaction.reply({ content: t('check.error_admin_id_not_set'), flags: MessageFlags.Ephemeral });
         return false;
     }
     if (!ADMIN_IDS.includes(user.id)) {
         logWarn(`${logPrefix} Unauthorized use attempt by User:${user.id}. User not in ADMIN_IDS.`);
-        await interaction.reply({ content: t('check.error_permission_admin'), ephemeral: true });
+        await interaction.reply({ content: t('check.error_permission_admin'), flags: MessageFlags.Ephemeral });
         return false;
     }
     if (!guild) {
         logWarn(`${logPrefix} Command used outside of a guild channel.`);
-        await interaction.reply({ content: t('general.error_guild_only'), ephemeral: true });
+        await interaction.reply({ content: t('general.error_guild_only'), flags: MessageFlags.Ephemeral });
         return false;
     }
     return true;
@@ -124,7 +124,7 @@ function _buildCheckEmbed(targetUser, guild, stats, requesterUsername, t) {
  */
 async function _sendSafeReply(interaction, options, logPrefix) {
     try {
-        const replyOptions = typeof options === 'string' ? { content: options, ephemeral: true } : options;
+        const replyOptions = typeof options === 'string' ? { content: options, flags: MessageFlags.Ephemeral } : options;
         if (interaction.replied || interaction.deferred) {
             await interaction.editReply(replyOptions);
         } else {
@@ -135,7 +135,7 @@ async function _sendSafeReply(interaction, options, logPrefix) {
         logError(`${logPrefix} Failed to send or edit reply:`, replyError);
         if (interaction.deferred && !interaction.replied) {
             try {
-                await interaction.followUp(typeof options === 'string' ? { content: options, ephemeral: true } : options);
+                await interaction.followUp(typeof options === 'string' ? { content: options, flags: MessageFlags.Ephemeral } : options);
             } catch (followUpError) {
                 logError(`${logPrefix} Failed to follow up after editReply failure:`, followUpError);
             }
@@ -153,7 +153,7 @@ module.exports = {
             option.setName('user')
                 .setDescription('The user whose invite stats you want to check.')
                 .setRequired(true))
-        .setDMPermission(false),
+        .setContexts(InteractionContextType.Guild),
 
     async execute(interaction) {
         const { user, guild, options } = interaction;
@@ -165,11 +165,11 @@ module.exports = {
 
         // --- 2. Deferral ---
         try {
-            await interaction.deferReply({ ephemeral: true });
+            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         } catch (deferError) {
             logError(`${logPrefix} Failed to defer reply:`, deferError);
             try {
-                await interaction.reply({ content: t('check.error_start_command'), ephemeral: true });
+                await interaction.reply({ content: t('check.error_start_command'), flags: MessageFlags.Ephemeral });
             } catch { /* interaction likely expired */ }
             return;
         }
@@ -178,7 +178,7 @@ module.exports = {
         const targetUser = options.getUser('user', true);
         if (!targetUser) {
             logError(`${logPrefix} Target user option was somehow missing despite being required.`);
-            await _sendSafeReply(interaction, { content: t('check.error_user_retrieve'), ephemeral: true }, logPrefix);
+            await _sendSafeReply(interaction, { content: t('check.error_user_retrieve'), flags: MessageFlags.Ephemeral }, logPrefix);
             return;
         }
 
@@ -191,7 +191,7 @@ module.exports = {
             const stats = await _fetchUserInviteStats(guildId, targetUserId, logPrefix);
 
             const embed = _buildCheckEmbed(targetUser, guild, stats, user.username, t);
-            await _sendSafeReply(interaction, { embeds: [embed], ephemeral: true }, logPrefix);
+            await _sendSafeReply(interaction, { embeds: [embed], flags: MessageFlags.Ephemeral }, logPrefix);
             logInfo(`${logPrefix} Stats for TargetUser:${targetUserId}. Validated: ${stats.validatedCount}, Pending: ${stats.pendingCount}, DB Error: ${stats.error}`);
 
         } catch (error) {
@@ -200,7 +200,7 @@ module.exports = {
                 user_tag: targetUser.username,
                 error_message: error.message || 'Unknown error',
             });
-            await _sendSafeReply(interaction, { content: userErrorMessage, embeds: [], ephemeral: true }, logPrefix);
+            await _sendSafeReply(interaction, { content: userErrorMessage, embeds: [], flags: MessageFlags.Ephemeral }, logPrefix);
         }
     },
 };
