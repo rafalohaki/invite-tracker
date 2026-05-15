@@ -1,3 +1,13 @@
 node_modules
 .env
 *.log
+
+# SQLite database and side-car files (contain user data — never commit)
+invites.db
+invites.db-journal
+invites.db-wal
+invites.db-shm
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
