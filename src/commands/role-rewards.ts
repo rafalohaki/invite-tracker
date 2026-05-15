@@ -1,10 +1,11 @@
 import {
     ApplicationIntegrationType,
     type ChatInputCommandInteraction,
-    EmbedBuilder,
+    ContainerBuilder,
     InteractionContextType,
     MessageFlags,
     PermissionFlagsBits,
+    SeparatorSpacingSize,
     SlashCommandBuilder,
 } from 'discord.js';
 import { EMBED_COLORS } from '@/config/constants.ts';
@@ -125,13 +126,27 @@ export function buildRoleRewardsCommand(ctx: AppContext): Command {
                         });
                         return;
                     }
-                    const lines = rewards.map((r) => `• \`${r.threshold}\` validated → <@&${r.roleId}>`);
-                    const embed = new EmbedBuilder()
-                        .setColor(EMBED_COLORS.roleRewards)
-                        .setTitle(`Role rewards for ${guild.name}`)
-                        .setDescription(lines.join('\n'))
-                        .setFooter({ text: `${rewards.length} reward(s) configured` });
-                    await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+
+                    // Components v2 — modern UI from discord.js v14.26 (ContainerBuilder).
+                    // ContainerBuilder needs MessageFlags.IsComponentsV2; can be combined with
+                    // Ephemeral via bitwise OR — but cannot coexist with `content` or `embeds`.
+                    const container = new ContainerBuilder()
+                        .setAccentColor(EMBED_COLORS.roleRewards)
+                        .addTextDisplayComponents((td) => td.setContent(`## 🎁 Role rewards for ${guild.name}`))
+                        .addSeparatorComponents((s) => s.setSpacing(SeparatorSpacingSize.Small));
+                    for (const r of rewards) {
+                        container.addTextDisplayComponents((td) =>
+                            td.setContent(`**\`${r.threshold}\`** validated invites → <@&${r.roleId}>`),
+                        );
+                    }
+                    container
+                        .addSeparatorComponents((s) => s.setSpacing(SeparatorSpacingSize.Small))
+                        .addTextDisplayComponents((td) => td.setContent(`-# ${rewards.length} reward(s) configured`));
+
+                    await interaction.reply({
+                        components: [container],
+                        flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
+                    });
                     return;
                 }
             } catch (err) {
