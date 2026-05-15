@@ -1,6 +1,7 @@
 import { Events } from 'discord.js';
 import { findUsedInviteAndStale } from '@/services/invite-attribution.ts';
 import { cacheGuildInvites, ensureCachedUses, fetchInvitesSafe } from '@/services/invite-cache.ts';
+import { sendWelcomeMessage } from '@/services/welcome.ts';
 import type { AppClient, AppContext } from '@/types/discord.ts';
 import { ensureFullMemberData } from '@/utils/discord-members.ts';
 import { logError, logInfo, logWarn } from '@/utils/logger.ts';
@@ -75,12 +76,29 @@ export function registerGuildMemberAdd(client: AppClient, ctx: AppContext): void
                 attribution?.inviteCode ?? null,
             );
 
-            // 6. If we attributed, create the pending TrackedJoin. Anti-cheat + welcome land in later PRs.
+            // 6. If we attributed, create the pending TrackedJoin and send the welcome message.
+            //    Anti-cheat lands in PR #9; for now every attributed join is treated as legitimate.
             if (attribution) {
                 ctx.repos.trackedJoins.upsertPending(guild.id, user.id, attribution.inviterId, attribution.inviteCode);
                 logInfo(
                     `${prefix} Recorded pending TrackedJoin (inviter ${attribution.inviterId}, code ${attribution.inviteCode}).`,
                 );
+
+                // Send welcome message (best effort — fetch inviter as a User, not a member of THIS guild,
+                // so we still mention them even if they since left).
+                try {
+                    const inviterUser = await client.users.fetch(attribution.inviterId).catch(() => null);
+                    if (inviterUser) {
+                        const validatedCount = ctx.repos.trackedJoins.countByStatus(
+                            guild.id,
+                            attribution.inviterId,
+                            'validated',
+                        );
+                        await sendWelcomeMessage(ctx, guild, member, inviterUser, validatedCount);
+                    }
+                } catch (err) {
+                    logError(`${prefix} Welcome message dispatch failed:`, err);
+                }
             }
 
             // 7. Refresh cache so the next join sees the new counts.
