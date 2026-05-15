@@ -2,10 +2,11 @@ import {
     ApplicationIntegrationType,
     type AutocompleteInteraction,
     type ChatInputCommandInteraction,
-    EmbedBuilder,
+    ContainerBuilder,
     InteractionContextType,
     MessageFlags,
     PermissionFlagsBits,
+    SeparatorSpacingSize,
     SlashCommandBuilder,
 } from 'discord.js';
 import { z } from 'zod';
@@ -75,33 +76,31 @@ export function buildConfigCommand(ctx: AppContext): Command {
             try {
                 if (sub === 'get') {
                     const cfg = ctx.repos.guildConfig.getOrDefault(guild.id);
-                    const embed = new EmbedBuilder()
-                        .setColor(EMBED_COLORS.config)
-                        .setTitle(`Configuration for ${guild.name}`)
-                        .addFields(
-                            {
-                                name: 'validation_period_days',
-                                value: `\`${cfg.validation_period_days}\``,
-                                inline: true,
-                            },
-                            {
-                                name: 'anti_cheat_window_days',
-                                value: `\`${cfg.anti_cheat_window_days}\``,
-                                inline: true,
-                            },
-                            { name: 'locale', value: `\`${cfg.locale}\``, inline: true },
-                            {
-                                name: 'welcome_channel_id',
-                                value: cfg.welcome_channel_id ? `<#${cfg.welcome_channel_id}>` : '_(unset)_',
-                            },
-                            {
-                                name: 'welcome_template',
-                                value: cfg.welcome_template ? `\`\`\`\n${cfg.welcome_template}\n\`\`\`` : '_(unset)_',
-                            },
+                    const welcomeChannel = cfg.welcome_channel_id ? `<#${cfg.welcome_channel_id}>` : '_(unset)_';
+                    const welcomeTemplate = cfg.welcome_template
+                        ? `\`\`\`\n${cfg.welcome_template}\n\`\`\``
+                        : '_(unset)_';
+                    const container = new ContainerBuilder()
+                        .setAccentColor(EMBED_COLORS.config)
+                        .addTextDisplayComponents((td) => td.setContent(`## ⚙️ Configuration for ${guild.name}`))
+                        .addSeparatorComponents((s) => s.setSpacing(SeparatorSpacingSize.Small))
+                        .addTextDisplayComponents((td) =>
+                            td.setContent(`**validation_period_days** \`${cfg.validation_period_days}\``),
                         )
-                        .setFooter({ text: 'Values shown reflect env defaults when DB row is NULL.' })
-                        .setTimestamp();
-                    await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+                        .addTextDisplayComponents((td) =>
+                            td.setContent(`**anti_cheat_window_days** \`${cfg.anti_cheat_window_days}\``),
+                        )
+                        .addTextDisplayComponents((td) => td.setContent(`**locale** \`${cfg.locale}\``))
+                        .addTextDisplayComponents((td) => td.setContent(`**welcome_channel_id** ${welcomeChannel}`))
+                        .addTextDisplayComponents((td) => td.setContent(`**welcome_template** ${welcomeTemplate}`))
+                        .addSeparatorComponents((s) => s.setSpacing(SeparatorSpacingSize.Small))
+                        .addTextDisplayComponents((td) =>
+                            td.setContent('-# Values reflect env defaults when the DB row is NULL.'),
+                        );
+                    await interaction.reply({
+                        components: [container],
+                        flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
+                    });
                     return;
                 }
 

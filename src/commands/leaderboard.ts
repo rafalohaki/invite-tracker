@@ -1,10 +1,14 @@
 import {
+    type ActionRowBuilder,
     ApplicationIntegrationType,
+    type ButtonBuilder,
     type ChatInputCommandInteraction,
-    EmbedBuilder,
+    ContainerBuilder,
     type Guild,
     GuildMember,
     InteractionContextType,
+    MessageFlags,
+    SeparatorSpacingSize,
     SlashCommandBuilder,
 } from 'discord.js';
 import { EMBED_COLORS } from '@/config/constants.ts';
@@ -22,18 +26,25 @@ const PERIOD_LABEL: Record<LeaderboardPeriod, string> = {
 };
 
 /**
- * Pure renderer for a single page — shared between the slash command (initial render)
- * and the button dispatcher (page navigation).
+ * Renders one page of the leaderboard as a Components v2 payload.
  *
- * Strategy: query LIMIT+1 rows to peek whether there's a next page, without a
- * separate COUNT(DISTINCT inviterId) query.
+ * Returned `components` array is `[Container, ActionRow]` (ActionRow only when
+ * there is at least one row to paginate). Caller passes the whole array straight
+ * to `editReply({ components })`. Flags are set once on the initial `deferReply`
+ * (`MessageFlags.IsComponentsV2`) and inherited by every subsequent edit.
+ *
+ * Strategy: query LIMIT+1 rows to peek whether there's a next page — no separate
+ * COUNT(DISTINCT inviterId) query.
  */
 export async function renderLeaderboardPage(
     ctx: AppContext,
     guild: Guild,
     page: number,
     period: LeaderboardPeriod,
-): Promise<{ embed: EmbedBuilder; row: ReturnType<typeof buildLeaderboardRow>; rowsOnPage: number }> {
+): Promise<{
+    components: [ContainerBuilder] | [ContainerBuilder, ActionRowBuilder<ButtonBuilder>];
+    rowsOnPage: number;
+}> {
     const logPrefix = `[LeaderboardRender][Guild:${guild.id}]`;
     const guildLocale = ctx.repos.guildConfig.getOrDefault(guild.id).locale;
 
@@ -42,11 +53,16 @@ export async function renderLeaderboardPage(
     const hasMore = rows.length > LEADERBOARD_PAGE_SIZE;
     const pageRows = hasMore ? rows.slice(0, LEADERBOARD_PAGE_SIZE) : rows;
 
-    let description: string;
+    const container = new ContainerBuilder()
+        .setAccentColor(EMBED_COLORS.leaderboard)
+        .addTextDisplayComponents((td) =>
+            td.setContent(`## 🏆 ${t('leaderboard.embed_title', { guild_name: guild.name }, guildLocale)}`),
+        )
+        .addSeparatorComponents((s) => s.setSpacing(SeparatorSpacingSize.Small));
+
     if (pageRows.length === 0) {
-        description = t('leaderboard.no_data', {}, guildLocale);
+        container.addTextDisplayComponents((td) => td.setContent(t('leaderboard.no_data', {}, guildLocale)));
     } else {
-        const lines: string[] = [];
         for (let i = 0; i < pageRows.length; i++) {
             // biome-ignore lint/style/noNonNullAssertion: bounded loop
             const entry = pageRows[i]!;
@@ -62,26 +78,25 @@ export async function renderLeaderboardPage(
                     logWarn(`${logPrefix} Failed to fetch inviter ${entry.inviterId}:`, err);
                 }
             }
-            lines.push(t('leaderboard.entry_format', { rank, username: displayName, count: entry.count }, guildLocale));
-        }
-        description = lines.join('\n');
-        if (description.length > 4096) {
-            logWarn(`${logPrefix} Description exceeded 4096 chars; truncating.`);
-            description = `${description.substring(0, 4090)}\n…`;
+            container.addTextDisplayComponents((td) =>
+                td.setContent(
+                    t('leaderboard.entry_format', { rank, username: displayName, count: entry.count }, guildLocale),
+                ),
+            );
         }
     }
 
-    const embed = new EmbedBuilder()
-        .setColor(EMBED_COLORS.leaderboard)
-        .setTitle(t('leaderboard.embed_title', { guild_name: guild.name }, guildLocale))
-        .setDescription(description)
-        .setFooter({
-            text: `${PERIOD_LABEL[period]} • Page ${page + 1}${hasMore ? '+' : ''}`,
-        })
-        .setTimestamp();
+    container
+        .addSeparatorComponents((s) => s.setSpacing(SeparatorSpacingSize.Small))
+        .addTextDisplayComponents((td) =>
+            td.setContent(`-# ${PERIOD_LABEL[period]} • Page ${page + 1}${hasMore ? '+' : ''}`),
+        );
 
+    if (pageRows.length === 0) {
+        return { components: [container], rowsOnPage: 0 };
+    }
     const row = buildLeaderboardRow(page, hasMore, period);
-    return { embed, row, rowsOnPage: pageRows.length };
+    return { components: [container, row], rowsOnPage: pageRows.length };
 }
 
 export function buildLeaderboardCommand(ctx: AppContext): Command {
@@ -104,34 +119,31 @@ export function buildLeaderboardCommand(ctx: AppContext): Command {
         async execute(interaction: ChatInputCommandInteraction) {
             const { guild } = interaction;
             if (!guild) {
-                await interaction.reply({ content: t('general.error_guild_only') });
+                await interaction.reply({
+                    content: t('general.error_guild_only'),
+                    flags: MessageFlags.Ephemeral,
+                });
                 return;
             }
             const period = (interaction.options.getString('period') as LeaderboardPeriod | null) ?? 'all';
             const logPrefix = `[LeaderboardCmd][Guild:${guild.id}]`;
-            await interaction.deferReply();
+
+            // Public reply (no Ephemeral flag) — leaderboard is visible to everyone.
+            // Cast around discord.js@14.26.4 type bug: `deferReply.flags` is typed as Ephemeral
+            // only; the runtime accepts IsComponentsV2. No behavioural impact.
+            await interaction.deferReply({ flags: MessageFlags.IsComponentsV2 as MessageFlags.Ephemeral });
 
             try {
-                const { embed, row, rowsOnPage } = await renderLeaderboardPage(ctx, guild, 0, period);
-                if (rowsOnPage === 0) {
-                    await interaction.editReply({ embeds: [embed] });
-                    return;
-                }
-                await interaction.editReply({ embeds: [embed], components: [row] });
+                const { components, rowsOnPage } = await renderLeaderboardPage(ctx, guild, 0, period);
+                await interaction.editReply({ components });
                 logInfo(`${logPrefix} Served leaderboard (period=${period}, page=0, rows=${rowsOnPage}).`);
             } catch (err) {
                 logError(`${logPrefix} Critical error:`, err);
-                if (interaction.deferred || interaction.replied) {
-                    await interaction
-                        .followUp({
-                            content: t(
-                                'leaderboard.error_critical',
-                                {},
-                                ctx.repos.guildConfig.getOrDefault(guild.id).locale,
-                            ),
-                        })
-                        .catch(() => {});
-                }
+                const guildLocale = ctx.repos.guildConfig.getOrDefault(guild.id).locale;
+                const errorContainer = new ContainerBuilder()
+                    .setAccentColor(0xed4245)
+                    .addTextDisplayComponents((td) => td.setContent(t('leaderboard.error_critical', {}, guildLocale)));
+                await interaction.editReply({ components: [errorContainer] }).catch(() => {});
             }
         },
     };

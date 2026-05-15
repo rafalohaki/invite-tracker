@@ -1,9 +1,10 @@
 import {
     ApplicationIntegrationType,
     type ChatInputCommandInteraction,
-    EmbedBuilder,
+    ContainerBuilder,
     InteractionContextType,
     MessageFlags,
+    SeparatorSpacingSize,
     SlashCommandBuilder,
 } from 'discord.js';
 import { EMBED_COLORS } from '@/config/constants.ts';
@@ -51,13 +52,6 @@ export function buildCheckCommand(ctx: AppContext): Command {
                 return;
             }
 
-            try {
-                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-            } catch (err) {
-                logError(`${logPrefix} Failed to defer:`, err);
-                return;
-            }
-
             const targetUser = options.getUser('user', true);
             const targetId = targetUser.id;
             logInfo(`${logPrefix} Admin ${user.username} inspecting ${targetUser.username} (${targetId}).`);
@@ -69,56 +63,71 @@ export function buildCheckCommand(ctx: AppContext): Command {
                 const pending = ctx.repos.trackedJoins.countByStatus(guild.id, targetId, 'pending');
                 const flagged = ctx.repos.joinHistory.getFlaggedForUser(guild.id, targetId);
 
-                const embed = new EmbedBuilder()
-                    .setColor(EMBED_COLORS.check)
-                    .setTitle(t('check.embed_title', { username: targetUser.username }, guildLocale))
-                    .setDescription(
-                        t(
-                            'check.embed_description',
-                            { user_tag: targetUser.username, guild_name: guild.name },
-                            guildLocale,
+                const inviteLine = inviteCode
+                    ? `🔗 **${t('check.link_field_name', {}, guildLocale)}** https://discord.gg/${inviteCode}`
+                    : `🔗 ${t('check.error_no_invite_value', { user_tag: targetUser.username }, guildLocale)}`;
+
+                const container = new ContainerBuilder()
+                    .setAccentColor(EMBED_COLORS.check)
+                    .addTextDisplayComponents((td) =>
+                        td.setContent(
+                            `## 📊 ${t('check.embed_title', { username: targetUser.username }, guildLocale)}`,
                         ),
                     )
-                    .addFields(
-                        {
-                            name: t('check.link_field_name', {}, guildLocale),
-                            value: inviteCode
-                                ? `https://discord.gg/${inviteCode}`
-                                : t('check.error_no_invite_value', { user_tag: targetUser.username }, guildLocale),
-                        },
-                        {
-                            name: t('check.validated_field_name', {}, guildLocale),
-                            value: `\`${validated}\``,
-                            inline: true,
-                        },
-                        {
-                            name: t('check.pending_field_name', {}, guildLocale),
-                            value: `\`${pending}\``,
-                            inline: true,
-                        },
+                    .addTextDisplayComponents((td) =>
+                        td.setContent(
+                            t(
+                                'check.embed_description',
+                                { user_tag: targetUser.username, guild_name: guild.name },
+                                guildLocale,
+                            ),
+                        ),
                     )
-                    .setFooter({ text: t('check.footer_success', { admin_tag: user.username }, guildLocale) })
-                    .setTimestamp();
+                    .addSeparatorComponents((s) => s.setSpacing(SeparatorSpacingSize.Small))
+                    .addTextDisplayComponents((td) => td.setContent(inviteLine))
+                    .addTextDisplayComponents((td) =>
+                        td.setContent(
+                            `✅ **${t('check.validated_field_name', {}, guildLocale)}** \`${validated}\` · ⏳ **${t('check.pending_field_name', {}, guildLocale)}** \`${pending}\``,
+                        ),
+                    );
 
                 if (flagged.length > 0) {
-                    const lines = flagged.slice(0, 5).map((row) => {
+                    container
+                        .addSeparatorComponents((s) => s.setSpacing(SeparatorSpacingSize.Small))
+                        .addTextDisplayComponents((td) =>
+                            td.setContent(`### 🚨 Rejoin history (flagged: ${flagged.length})`),
+                        );
+                    for (const row of flagged.slice(0, 5)) {
                         const inviter = row.inviterId ? `<@${row.inviterId}>` : '_(unknown inviter)_';
-                        return `• \`${row.joinTimestamp}\` — invited by ${inviter}`;
-                    });
-                    const more = flagged.length > 5 ? `\n…and ${flagged.length - 5} more.` : '';
-                    embed.addFields({
-                        name: `Rejoin history (flagged: ${flagged.length})`,
-                        value: `${lines.join('\n')}${more}`,
-                    });
+                        container.addTextDisplayComponents((td) =>
+                            td.setContent(`• \`${row.joinTimestamp}\` — invited by ${inviter}`),
+                        );
+                    }
+                    if (flagged.length > 5) {
+                        container.addTextDisplayComponents((td) =>
+                            td.setContent(`-# …and ${flagged.length - 5} more.`),
+                        );
+                    }
                 }
 
-                if (targetUser.avatar) embed.setThumbnail(targetUser.displayAvatarURL());
-                await interaction.editReply({ embeds: [embed] });
+                container
+                    .addSeparatorComponents((s) => s.setSpacing(SeparatorSpacingSize.Small))
+                    .addTextDisplayComponents((td) =>
+                        td.setContent(`-# ${t('check.footer_success', { admin_tag: user.username }, guildLocale)}`),
+                    );
+
+                // Direct reply (no defer) — DB queries are synchronous and finish well under
+                // the 3s defer deadline. Sidesteps the discord.js@14.26 type bug where
+                // `deferReply.flags` is typed `Ephemeral` only.
+                await interaction.reply({
+                    components: [container],
+                    flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
+                });
             } catch (err) {
                 logError(`${logPrefix} Critical error:`, err);
-                await interaction
-                    .editReply({
-                        content: t(
+                const errorContainer = new ContainerBuilder().setAccentColor(0xed4245).addTextDisplayComponents((td) =>
+                    td.setContent(
+                        t(
                             'check.error_critical',
                             {
                                 user_tag: targetUser.username,
@@ -126,9 +135,23 @@ export function buildCheckCommand(ctx: AppContext): Command {
                             },
                             guildLocale,
                         ),
-                        embeds: [],
-                    })
-                    .catch(() => {});
+                    ),
+                );
+                if (interaction.replied) {
+                    await interaction
+                        .followUp({
+                            components: [errorContainer],
+                            flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
+                        })
+                        .catch(() => {});
+                } else {
+                    await interaction
+                        .reply({
+                            components: [errorContainer],
+                            flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
+                        })
+                        .catch(() => {});
+                }
             }
         },
     };

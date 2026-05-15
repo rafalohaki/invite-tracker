@@ -13,9 +13,10 @@ export async function handleLeaderboardButton(interaction: ButtonInteraction, ct
     const prefix = `[LeaderboardBtn][Guild:${interaction.guild.id}][User:${interaction.user.id}]`;
 
     try {
+        // deferUpdate inherits the parent message's flags — Components v2 stays set.
         await interaction.deferUpdate();
-        const { embed, row, rowsOnPage } = await renderLeaderboardPage(ctx, interaction.guild, newPage, state.period);
-        await interaction.editReply({ embeds: [embed], components: rowsOnPage > 0 ? [row] : [] });
+        const { components, rowsOnPage } = await renderLeaderboardPage(ctx, interaction.guild, newPage, state.period);
+        await interaction.editReply({ components });
         logInfo(`${prefix} Navigated to page ${newPage} (period=${state.period}, rows=${rowsOnPage}).`);
     } catch (err) {
         logError(`${prefix} Failed to handle pagination:`, err);

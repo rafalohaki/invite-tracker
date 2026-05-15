@@ -2,13 +2,14 @@ import {
     ApplicationIntegrationType,
     ChannelType,
     type ChatInputCommandInteraction,
-    EmbedBuilder,
+    ContainerBuilder,
     type Guild,
     type GuildBasedChannel,
     InteractionContextType,
     type Invite,
     MessageFlags,
     PermissionFlagsBits,
+    SeparatorSpacingSize,
     SlashCommandBuilder,
 } from 'discord.js';
 import { EMBED_COLORS } from '@/config/constants.ts';
@@ -16,6 +17,11 @@ import { t } from '@/i18n/translator.ts';
 import type { AppContext, Command } from '@/types/discord.ts';
 import { DISCORD_ERROR_CODES, hasErrorCode, isUnknownInvite } from '@/utils/discord-errors.ts';
 import { logError, logInfo, logWarn } from '@/utils/logger.ts';
+
+/** Tiny helper: wrap a plain text string as a Components v2 Container, so editReply works under IsComponentsV2. */
+function plainTextContainer(message: string, accentColor: number): ContainerBuilder {
+    return new ContainerBuilder().setAccentColor(accentColor).addTextDisplayComponents((td) => td.setContent(message));
+}
 
 const INVITE_CAPABLE_CHANNEL_TYPES = new Set<number>([
     ChannelType.GuildText,
@@ -111,11 +117,19 @@ export function buildInviteCommand(ctx: AppContext): Command {
             const logPrefix = `[InviteCmd][Guild:${guild.id}][User:${user.id}]`;
 
             try {
-                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+                // Defer with Components v2 + Ephemeral combined. Cast around discord.js@14.26.4
+                // type bug — `InteractionDeferReplyOptions.flags` is typed as `Ephemeral` only,
+                // but the runtime accepts `IsComponentsV2 | Ephemeral`. The cast does not change
+                // behaviour, only silences a misleading compile-time error.
+                await interaction.deferReply({
+                    flags: (MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral) as MessageFlags.Ephemeral,
+                });
             } catch (err) {
                 logError(`${logPrefix} Failed to defer reply:`, err);
                 return;
             }
+
+            const guildLocale = ctx.repos.guildConfig.getOrDefault(guild.id).locale;
 
             try {
                 // 1. Read existing invite code, validate on Discord, create if needed.
@@ -127,13 +141,20 @@ export function buildInviteCommand(ctx: AppContext): Command {
                 if (!inviteCode) {
                     const targetChannel = resolveInviteChannel(channel as GuildBasedChannel);
                     if (!targetChannel) {
-                        await interaction.editReply({ content: t('invite.error_invalid_channel_type') });
+                        await interaction.editReply({
+                            components: [plainTextContainer(t('invite.error_invalid_channel_type'), 0xed4245)],
+                        });
                         return;
                     }
                     const newInvite = await createNewInvite(targetChannel, user.id, user.username, logPrefix);
                     if (!newInvite) {
                         await interaction.editReply({
-                            content: t('invite.error_permission_create', { channel_name: targetChannel.name }),
+                            components: [
+                                plainTextContainer(
+                                    t('invite.error_permission_create', { channel_name: targetChannel.name }),
+                                    0xed4245,
+                                ),
+                            ],
                         });
                         return;
                     }
@@ -145,34 +166,32 @@ export function buildInviteCommand(ctx: AppContext): Command {
                 const validated = ctx.repos.trackedJoins.countByStatus(guild.id, user.id, 'validated');
                 const pending = ctx.repos.trackedJoins.countByStatus(guild.id, user.id, 'pending');
 
-                // 3. Build embed.
-                const guildLocale = ctx.repos.guildConfig.getOrDefault(guild.id).locale;
-                const embed = new EmbedBuilder()
-                    .setColor(EMBED_COLORS.invite)
-                    .setTitle(t('invite.embed_title', { username: user.username }, guildLocale))
-                    .setDescription(t('invite.embed_description', { guild_name: guild.name }, guildLocale))
-                    .addFields(
-                        {
-                            name: t('invite.link_field_name', {}, guildLocale),
-                            value: `https://discord.gg/${inviteCode}`,
-                        },
-                        {
-                            name: t('invite.validated_field_name', {}, guildLocale),
-                            value: `\`${validated}\``,
-                            inline: true,
-                        },
-                        {
-                            name: t('invite.pending_field_name', {}, guildLocale),
-                            value: `\`${pending}\``,
-                            inline: true,
-                        },
+                // 3. Build Components v2 container.
+                const container = new ContainerBuilder()
+                    .setAccentColor(EMBED_COLORS.invite)
+                    .addTextDisplayComponents((td) =>
+                        td.setContent(`## 🔗 ${t('invite.embed_title', { username: user.username }, guildLocale)}`),
                     )
-                    .setFooter({ text: t('invite.footer_success', {}, guildLocale) })
-                    .setTimestamp();
+                    .addTextDisplayComponents((td) =>
+                        td.setContent(t('invite.embed_description', { guild_name: guild.name }, guildLocale)),
+                    )
+                    .addSeparatorComponents((s) => s.setSpacing(SeparatorSpacingSize.Small))
+                    .addTextDisplayComponents((td) =>
+                        td.setContent(
+                            `**${t('invite.link_field_name', {}, guildLocale)}** https://discord.gg/${inviteCode}`,
+                        ),
+                    )
+                    .addTextDisplayComponents((td) =>
+                        td.setContent(
+                            `✅ **${t('invite.validated_field_name', {}, guildLocale)}** \`${validated}\` · ⏳ **${t('invite.pending_field_name', {}, guildLocale)}** \`${pending}\``,
+                        ),
+                    )
+                    .addSeparatorComponents((s) => s.setSpacing(SeparatorSpacingSize.Small))
+                    .addTextDisplayComponents((td) =>
+                        td.setContent(`-# ${t('invite.footer_success', {}, guildLocale)}`),
+                    );
 
-                if (user.avatar) embed.setThumbnail(user.displayAvatarURL());
-
-                await interaction.editReply({ embeds: [embed] });
+                await interaction.editReply({ components: [container] });
                 logInfo(`${logPrefix} Served invite ${inviteCode} (validated=${validated}, pending=${pending}).`);
             } catch (err) {
                 logError(`${logPrefix} Critical error in /invite:`, err);
@@ -182,10 +201,14 @@ export function buildInviteCommand(ctx: AppContext): Command {
                 }
                 try {
                     await interaction.editReply({
-                        content: t('invite.error_critical', {
-                            error_message: err instanceof Error ? err.message : 'unknown',
-                        }),
-                        embeds: [],
+                        components: [
+                            plainTextContainer(
+                                t('invite.error_critical', {
+                                    error_message: err instanceof Error ? err.message : 'unknown',
+                                }),
+                                0xed4245,
+                            ),
+                        ],
                     });
                 } catch (replyErr) {
                     logError(`${logPrefix} Failed to send error reply:`, replyErr);
