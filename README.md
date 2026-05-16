@@ -2,6 +2,7 @@
 
 A Discord bot that tracks user-generated invites, validates joins after a configurable retention period, and rewards top inviters with roles. Built on **Bun + TypeScript + discord.js v14 + bun:sqlite**.
 
+[![CI](https://github.com/rafalohaki/invite-tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/rafalohaki/invite-tracker/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Bun](https://img.shields.io/badge/Bun-1.3+-000000.svg?logo=bun&logoColor=white)](https://bun.sh)
 [![discord.js](https://img.shields.io/badge/discord.js-v14.26-blue.svg?logo=discord&logoColor=white)](https://discord.js.org)

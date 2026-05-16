@@ -11,6 +11,7 @@ import { EMBED_COLORS } from '@/config/constants.ts';
 import { env } from '@/config/env.ts';
 import { t } from '@/i18n/translator.ts';
 import type { AppContext, Command } from '@/types/discord.ts';
+import { getErrorMessage } from '@/utils/errors.ts';
 import { logError, logInfo, logWarn } from '@/utils/logger.ts';
 
 export function buildCheckCommand(ctx: AppContext): Command {
@@ -33,7 +34,7 @@ export function buildCheckCommand(ctx: AppContext): Command {
                 return;
             }
             const logPrefix = `[CheckCmd][Guild:${guild.id}][Admin:${user.id}]`;
-            const guildLocale = ctx.repos.guildConfig.getOrDefault(guild.id).locale;
+            const guildLocale = ctx.repos.guildConfig.getLocale(guild.id);
 
             if (env.ADMIN_IDS.length === 0) {
                 logWarn(`${logPrefix} ADMIN_IDS is empty in .env; command refused.`);
@@ -131,7 +132,7 @@ export function buildCheckCommand(ctx: AppContext): Command {
                             'check.error_critical',
                             {
                                 user_tag: targetUser.username,
-                                error_message: err instanceof Error ? err.message : 'unknown',
+                                error_message: getErrorMessage(err),
                             },
                             guildLocale,
                         ),

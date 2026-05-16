@@ -16,6 +16,7 @@ import { EMBED_COLORS } from '@/config/constants.ts';
 import { t } from '@/i18n/translator.ts';
 import type { AppContext, Command } from '@/types/discord.ts';
 import { DISCORD_ERROR_CODES, hasErrorCode, isUnknownInvite } from '@/utils/discord-errors.ts';
+import { getErrorMessage } from '@/utils/errors.ts';
 import { logError, logInfo, logWarn } from '@/utils/logger.ts';
 
 /** Tiny helper: wrap a plain text string as a Components v2 Container, so editReply works under IsComponentsV2. */
@@ -129,7 +130,7 @@ export function buildInviteCommand(ctx: AppContext): Command {
                 return;
             }
 
-            const guildLocale = ctx.repos.guildConfig.getOrDefault(guild.id).locale;
+            const guildLocale = ctx.repos.guildConfig.getLocale(guild.id);
 
             try {
                 // 1. Read existing invite code, validate on Discord, create if needed.
@@ -204,7 +205,7 @@ export function buildInviteCommand(ctx: AppContext): Command {
                         components: [
                             plainTextContainer(
                                 t('invite.error_critical', {
-                                    error_message: err instanceof Error ? err.message : 'unknown',
+                                    error_message: getErrorMessage(err),
                                 }),
                                 0xed4245,
                             ),

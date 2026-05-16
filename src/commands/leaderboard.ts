@@ -5,7 +5,6 @@ import {
     type ChatInputCommandInteraction,
     ContainerBuilder,
     type Guild,
-    GuildMember,
     InteractionContextType,
     MessageFlags,
     SeparatorSpacingSize,
@@ -16,8 +15,8 @@ import { t } from '@/i18n/translator.ts';
 import { buildLeaderboardRow, LEADERBOARD_PAGE_SIZE } from '@/interactions/leaderboard-buttons.ts';
 import type { LeaderboardPeriod } from '@/types/db.ts';
 import type { AppContext, Command } from '@/types/discord.ts';
-import { isUnknownMemberOrUser } from '@/utils/discord-errors.ts';
-import { logError, logInfo, logWarn } from '@/utils/logger.ts';
+import { fetchMembersBatch } from '@/utils/discord-members.ts';
+import { logError, logInfo } from '@/utils/logger.ts';
 
 const PERIOD_LABEL: Record<LeaderboardPeriod, string> = {
     all: 'All time',
@@ -46,7 +45,7 @@ export async function renderLeaderboardPage(
     rowsOnPage: number;
 }> {
     const logPrefix = `[LeaderboardRender][Guild:${guild.id}]`;
-    const guildLocale = ctx.repos.guildConfig.getOrDefault(guild.id).locale;
+    const guildLocale = ctx.repos.guildConfig.getLocale(guild.id);
 
     const offset = page * LEADERBOARD_PAGE_SIZE;
     const rows = ctx.repos.trackedJoins.getLeaderboardPage(guild.id, LEADERBOARD_PAGE_SIZE + 1, offset, period);
@@ -63,21 +62,23 @@ export async function renderLeaderboardPage(
     if (pageRows.length === 0) {
         container.addTextDisplayComponents((td) => td.setContent(t('leaderboard.no_data', {}, guildLocale)));
     } else {
+        // Batch-fetch every inviter for this page in one API call instead of N (~10x latency cut).
+        const presence = await fetchMembersBatch(
+            guild,
+            pageRows.map((r) => r.inviterId),
+            logPrefix,
+        );
         for (let i = 0; i < pageRows.length; i++) {
             // biome-ignore lint/style/noNonNullAssertion: bounded loop
             const entry = pageRows[i]!;
             const rank = offset + i + 1;
-            let displayName = t('leaderboard.unknown_user_format', { userId: entry.inviterId }, guildLocale);
-            try {
-                const member = await guild.members.fetch(entry.inviterId);
-                if (member instanceof GuildMember) displayName = member.displayName;
-            } catch (err) {
-                if (isUnknownMemberOrUser(err)) {
-                    displayName = t('leaderboard.left_user_format', { userId: entry.inviterId }, guildLocale);
-                } else {
-                    logWarn(`${logPrefix} Failed to fetch inviter ${entry.inviterId}:`, err);
-                }
-            }
+            const result = presence.get(entry.inviterId);
+            const displayName =
+                result?.status === 'present'
+                    ? result.member.displayName
+                    : result?.status === 'left'
+                      ? t('leaderboard.left_user_format', { userId: entry.inviterId }, guildLocale)
+                      : t('leaderboard.unknown_user_format', { userId: entry.inviterId }, guildLocale);
             container.addTextDisplayComponents((td) =>
                 td.setContent(
                     t('leaderboard.entry_format', { rank, username: displayName, count: entry.count }, guildLocale),
@@ -139,7 +140,7 @@ export function buildLeaderboardCommand(ctx: AppContext): Command {
                 logInfo(`${logPrefix} Served leaderboard (period=${period}, page=0, rows=${rowsOnPage}).`);
             } catch (err) {
                 logError(`${logPrefix} Critical error:`, err);
-                const guildLocale = ctx.repos.guildConfig.getOrDefault(guild.id).locale;
+                const guildLocale = ctx.repos.guildConfig.getLocale(guild.id);
                 const errorContainer = new ContainerBuilder()
                     .setAccentColor(0xed4245)
                     .addTextDisplayComponents((td) => td.setContent(t('leaderboard.error_critical', {}, guildLocale)));

@@ -1,6 +1,59 @@
-import type { GuildMember, PartialGuildMember } from 'discord.js';
+import type { Guild, GuildMember, PartialGuildMember } from 'discord.js';
+import { MEMBER_FETCH_CHUNK_SIZE } from '@/config/constants.ts';
 import { isUnknownMemberOrUser } from './discord-errors.ts';
 import { logDebug, logError, logWarn } from './logger.ts';
+
+export type MemberFetchResult =
+    | { status: 'present'; member: GuildMember }
+    | { status: 'left' }
+    | { status: 'error_skip' };
+
+/**
+ * Resolve {userId → MemberFetchResult} for many users using batched fetch.
+ *
+ * - `present` — user is in the guild.
+ * - `left` — Discord returned UNKNOWN_MEMBER / UNKNOWN_USER (definitively gone).
+ * - `error_skip` — transient failure; caller should retry later (e.g. validation pass).
+ *
+ * Issues one `guild.members.fetch({ user: [...ids] })` per `MEMBER_FETCH_CHUNK_SIZE`
+ * (100, Discord API limit) instead of N individual fetches. Falls back to per-user
+ * fetches only when the batch errors, so a single bad ID doesn't poison the rest.
+ */
+export async function fetchMembersBatch(
+    guild: Guild,
+    userIds: readonly string[],
+    logPrefix: string,
+): Promise<Map<string, MemberFetchResult>> {
+    const result = new Map<string, MemberFetchResult>();
+    if (userIds.length === 0) return result;
+
+    for (let i = 0; i < userIds.length; i += MEMBER_FETCH_CHUNK_SIZE) {
+        const chunk = userIds.slice(i, i + MEMBER_FETCH_CHUNK_SIZE);
+        try {
+            const members = await guild.members.fetch({ user: [...chunk] });
+            for (const id of chunk) {
+                const member = members.get(id);
+                result.set(id, member ? { status: 'present', member } : { status: 'left' });
+            }
+        } catch (err) {
+            logWarn(`${logPrefix} Batch fetch failed for ${chunk.length} member(s); falling back per-user:`, err);
+            for (const id of chunk) {
+                try {
+                    const m = await guild.members.fetch({ user: id, force: true });
+                    result.set(id, { status: 'present', member: m });
+                } catch (perUserErr) {
+                    if (isUnknownMemberOrUser(perUserErr)) {
+                        result.set(id, { status: 'left' });
+                    } else {
+                        logWarn(`${logPrefix} Per-user fetch failed for ${id}:`, perUserErr);
+                        result.set(id, { status: 'error_skip' });
+                    }
+                }
+            }
+        }
+    }
+    return result;
+}
 
 /**
  * Resolves a possibly-partial member into a usable GuildMember.

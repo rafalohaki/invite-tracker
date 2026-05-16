@@ -10,6 +10,7 @@ import {
 } from 'discord.js';
 import { EMBED_COLORS } from '@/config/constants.ts';
 import type { AppContext, Command } from '@/types/discord.ts';
+import { getErrorMessage } from '@/utils/errors.ts';
 import { logError, logInfo } from '@/utils/logger.ts';
 import { canAssignRole } from '@/utils/permissions.ts';
 
@@ -83,7 +84,7 @@ export function buildRoleRewardsCommand(ctx: AppContext): Command {
                             flags: MessageFlags.Ephemeral,
                         });
                     } catch (err) {
-                        const msg = err instanceof Error ? err.message : 'unknown';
+                        const msg = getErrorMessage(err);
                         if (msg.toLowerCase().includes('unique')) {
                             await interaction.reply({
                                 content: `A reward at threshold ${threshold} already exists. Remove it first.`,
@@ -153,7 +154,7 @@ export function buildRoleRewardsCommand(ctx: AppContext): Command {
                 logError(`${prefix} Critical error:`, err);
                 await interaction
                     .reply({
-                        content: `Error: ${err instanceof Error ? err.message : 'unknown'}`,
+                        content: `Error: ${getErrorMessage(err)}`,
                         flags: MessageFlags.Ephemeral,
                     })
                     .catch(() => {});

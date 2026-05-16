@@ -14,6 +14,7 @@ import { EMBED_COLORS } from '@/config/constants.ts';
 import { CONFIG_KEYS, type ConfigKey } from '@/db/repositories/guild-config.ts';
 import { t } from '@/i18n/translator.ts';
 import type { AppContext, Command } from '@/types/discord.ts';
+import { getErrorMessage } from '@/utils/errors.ts';
 import { logError, logInfo, logWarn } from '@/utils/logger.ts';
 
 const SNOWFLAKE = /^\d{17,20}$/;
@@ -70,7 +71,7 @@ export function buildConfigCommand(ctx: AppContext): Command {
                 return;
             }
             const prefix = `[ConfigCmd][Guild:${guild.id}][User:${user.id}]`;
-            const guildLocale = ctx.repos.guildConfig.getOrDefault(guild.id).locale;
+            const guildLocale = ctx.repos.guildConfig.getLocale(guild.id);
             const sub = interaction.options.getSubcommand(true);
 
             try {
@@ -147,7 +148,7 @@ export function buildConfigCommand(ctx: AppContext): Command {
                 logWarn(`${prefix} Unknown subcommand: ${sub}`);
             } catch (err) {
                 logError(`${prefix} Critical error:`, err);
-                const msg = err instanceof Error ? err.message : 'unknown';
+                const msg = getErrorMessage(err);
                 await interaction
                     .reply({
                         content: `Error: ${msg}`,

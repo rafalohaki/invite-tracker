@@ -29,7 +29,7 @@ export function registerGuildMemberAdd(client: AppClient, ctx: AppContext): void
             }
 
             // 1. Heuristic delay so Discord's invite-uses counter has time to propagate.
-            await new Promise((resolve) => setTimeout(resolve, INVITE_FETCH_DELAY_MS));
+            await Bun.sleep(INVITE_FETCH_DELAY_MS);
 
             const currentInvites = await fetchInvitesSafe(guild);
             const cachedUses = await ensureCachedUses(guild);

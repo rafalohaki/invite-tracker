@@ -56,6 +56,11 @@ export class GuildConfigRepository {
         return this.stmtGet.get(guildId) ?? null;
     }
 
+    /** Convenience accessor — saves call-sites from `.getOrDefault(guildId).locale`. */
+    getLocale(guildId: string): Locale {
+        return this.getOrDefault(guildId).locale;
+    }
+
     /** Reads the row (creating an empty one if missing) and applies env defaults to NULL columns. */
     getOrDefault(guildId: string): ResolvedGuildConfig {
         const row = this.stmtGet.get(guildId);

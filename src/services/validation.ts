@@ -1,53 +1,11 @@
-import type { Guild } from 'discord.js';
-import { INITIAL_VALIDATION_DELAY_MS, MEMBER_FETCH_CHUNK_SIZE, ROLE_ASSIGN_THROTTLE_MS } from '@/config/constants.ts';
+import { INITIAL_VALIDATION_DELAY_MS, ROLE_ASSIGN_THROTTLE_MS } from '@/config/constants.ts';
 import { env } from '@/config/env.ts';
 import type { BulkValidationUpdate } from '@/db/repositories/tracked-joins.ts';
 import { assignEligibleRoles } from '@/services/role-rewards.ts';
 import type { AppClient, AppContext } from '@/types/discord.ts';
-import { isUnknownMemberOrUser } from '@/utils/discord-errors.ts';
-import { logError, logInfo, logWarn } from '@/utils/logger.ts';
+import { fetchMembersBatch } from '@/utils/discord-members.ts';
+import { logError, logInfo } from '@/utils/logger.ts';
 import { isoNow } from '@/utils/time.ts';
-
-type PresenceStatus = 'present' | 'left' | 'error_skip';
-
-/**
- * Resolve {userId → presence} for many users in one (or few) batched fetch(es).
- * Cheaper than N individual fetches; falls back to per-user only when the batch fails.
- */
-async function fetchPresenceForGuild(
-    guild: Guild,
-    userIds: readonly string[],
-    logPrefix: string,
-): Promise<Map<string, PresenceStatus>> {
-    const result = new Map<string, PresenceStatus>();
-    if (userIds.length === 0) return result;
-
-    for (let i = 0; i < userIds.length; i += MEMBER_FETCH_CHUNK_SIZE) {
-        const chunk = userIds.slice(i, i + MEMBER_FETCH_CHUNK_SIZE);
-        try {
-            const members = await guild.members.fetch({ user: [...chunk] });
-            for (const id of chunk) {
-                result.set(id, members.has(id) ? 'present' : 'left');
-            }
-        } catch (err) {
-            logWarn(`${logPrefix} Batch fetch failed for ${chunk.length} member(s); falling back per-user:`, err);
-            for (const id of chunk) {
-                try {
-                    await guild.members.fetch({ user: id, force: true });
-                    result.set(id, 'present');
-                } catch (perUserErr) {
-                    if (isUnknownMemberOrUser(perUserErr)) {
-                        result.set(id, 'left');
-                    } else {
-                        logWarn(`${logPrefix} Per-user fetch failed for ${id}:`, perUserErr);
-                        result.set(id, 'error_skip');
-                    }
-                }
-            }
-        }
-    }
-    return result;
-}
 
 /**
  * Single validation pass across every guild the bot is in:
@@ -73,13 +31,13 @@ export async function runValidation(client: AppClient, ctx: AppContext): Promise
 
             logInfo(`${guildPrefix} ${candidates.length} pending join(s) eligible.`);
             const userIds = candidates.map((c) => c.inviteeId);
-            const presence = await fetchPresenceForGuild(guild, userIds, guildPrefix);
+            const presence = await fetchMembersBatch(guild, userIds, guildPrefix);
 
             const validationTime = isoNow();
             const bulkOps: BulkValidationUpdate[] = [];
             for (const candidate of candidates) {
-                const status = presence.get(candidate.inviteeId);
-                if (status === 'present') {
+                const result = presence.get(candidate.inviteeId);
+                if (result?.status === 'present') {
                     bulkOps.push({
                         id: candidate.id,
                         status: 'validated',
@@ -89,7 +47,7 @@ export async function runValidation(client: AppClient, ctx: AppContext): Promise
                     const set = promotedByInviter.get(guild.id) ?? new Set<string>();
                     set.add(candidate.inviterId);
                     promotedByInviter.set(guild.id, set);
-                } else if (status === 'left') {
+                } else if (result?.status === 'left') {
                     bulkOps.push({
                         id: candidate.id,
                         status: 'left_early',
@@ -97,7 +55,7 @@ export async function runValidation(client: AppClient, ctx: AppContext): Promise
                         leaveTime: validationTime,
                     });
                 }
-                // error_skip → leave the row untouched, try again next run.
+                // error_skip → leave the row untouched, retry next pass.
             }
 
             if (bulkOps.length === 0) {
@@ -130,7 +88,7 @@ export async function runValidation(client: AppClient, ctx: AppContext): Promise
             } catch (err) {
                 logError(`[ValidationTask][Guild:${guildId}][Inviter:${inviterId}] Role assignment failed:`, err);
             }
-            await new Promise((resolve) => setTimeout(resolve, ROLE_ASSIGN_THROTTLE_MS));
+            await Bun.sleep(ROLE_ASSIGN_THROTTLE_MS);
         }
     }
 
