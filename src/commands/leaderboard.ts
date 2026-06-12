@@ -29,8 +29,8 @@ const PERIOD_LABEL: Record<LeaderboardPeriod, string> = {
  *
  * Returned `components` array is `[Container, ActionRow]` (ActionRow only when
  * there is at least one row to paginate). Caller passes the whole array straight
- * to `editReply({ components })`. Flags are set once on the initial `deferReply`
- * (`MessageFlags.IsComponentsV2`) and inherited by every subsequent edit.
+ * to `editReply({ components, flags: MessageFlags.IsComponentsV2 })` — per the
+ * discord.js guide, the CV2 flag belongs on the message edit, not the defer.
  *
  * Strategy: query LIMIT+1 rows to peek whether there's a next page — no separate
  * COUNT(DISTINCT inviterId) query.
@@ -129,14 +129,13 @@ export function buildLeaderboardCommand(ctx: AppContext): Command {
             const period = (interaction.options.getString('period') as LeaderboardPeriod | null) ?? 'all';
             const logPrefix = `[LeaderboardCmd][Guild:${guild.id}]`;
 
-            // Public reply (no Ephemeral flag) — leaderboard is visible to everyone.
-            // Cast around discord.js@14.26.4 type bug: `deferReply.flags` is typed as Ephemeral
-            // only; the runtime accepts IsComponentsV2. No behavioural impact.
-            await interaction.deferReply({ flags: MessageFlags.IsComponentsV2 as MessageFlags.Ephemeral });
+            // Public reply (no flags) — leaderboard is visible to everyone. Documented CV2
+            // pattern: defer plain, then set MessageFlags.IsComponentsV2 on editReply.
+            await interaction.deferReply();
 
             try {
                 const { components, rowsOnPage } = await renderLeaderboardPage(ctx, guild, 0, period);
-                await interaction.editReply({ components });
+                await interaction.editReply({ components, flags: MessageFlags.IsComponentsV2 });
                 logInfo(`${logPrefix} Served leaderboard (period=${period}, page=0, rows=${rowsOnPage}).`);
             } catch (err) {
                 logError(`${logPrefix} Critical error:`, err);
@@ -144,7 +143,9 @@ export function buildLeaderboardCommand(ctx: AppContext): Command {
                 const errorContainer = new ContainerBuilder()
                     .setAccentColor(0xed4245)
                     .addTextDisplayComponents((td) => td.setContent(t('leaderboard.error_critical', {}, guildLocale)));
-                await interaction.editReply({ components: [errorContainer] }).catch(() => {});
+                await interaction
+                    .editReply({ components: [errorContainer], flags: MessageFlags.IsComponentsV2 })
+                    .catch(() => {});
             }
         },
     };

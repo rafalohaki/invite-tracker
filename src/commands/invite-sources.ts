@@ -12,6 +12,9 @@ import { t } from '@/i18n/translator.ts';
 import type { AppContext, Command } from '@/types/discord.ts';
 import { logError, logInfo } from '@/utils/logger.ts';
 
+/** CV2 messages allow at most 40 components total — cap bar-chart rows with headroom. */
+const MAX_SHOWN_SOURCES = 30;
+
 export function buildInviteSourcesCommand(ctx: AppContext): Command {
     return {
         data: new SlashCommandBuilder()
@@ -44,8 +47,11 @@ export function buildInviteSourcesCommand(ctx: AppContext): Command {
                 if (stats.length === 0) {
                     container.addTextDisplayComponents((td) => td.setContent(t('sources.no_labels', {}, guildLocale)));
                 } else {
-                    const max = Math.max(1, ...stats.map((s) => s.count));
-                    for (const s of stats) {
+                    // CV2 messages allow at most 40 components total — show the top labels
+                    // (sourceStats is already sorted by count descending).
+                    const shown = stats.slice(0, MAX_SHOWN_SOURCES);
+                    const max = Math.max(1, ...shown.map((s) => s.count));
+                    for (const s of shown) {
                         const bar = '█'.repeat(Math.round((s.count / max) * 12)).padEnd(12, '░');
                         container.addTextDisplayComponents((td) =>
                             td.setContent(`\`${bar}\` **${s.label}** — \`${s.count}\``),

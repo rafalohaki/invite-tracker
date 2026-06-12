@@ -118,13 +118,10 @@ export function buildInviteCommand(ctx: AppContext): Command {
             const logPrefix = `[InviteCmd][Guild:${guild.id}][User:${user.id}]`;
 
             try {
-                // Defer with Components v2 + Ephemeral combined. Cast around discord.js@14.26.4
-                // type bug — `InteractionDeferReplyOptions.flags` is typed as `Ephemeral` only,
-                // but the runtime accepts `IsComponentsV2 | Ephemeral`. The cast does not change
-                // behaviour, only silences a misleading compile-time error.
-                await interaction.deferReply({
-                    flags: (MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral) as MessageFlags.Ephemeral,
-                });
+                // Documented CV2 pattern (discord.js guide, "Display components"): the
+                // IsComponentsV2 flag is NOT for deferring — defer with Ephemeral only,
+                // then set the flag on editReply, which officially supports it.
+                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
             } catch (err) {
                 logError(`${logPrefix} Failed to defer reply:`, err);
                 return;
@@ -144,6 +141,7 @@ export function buildInviteCommand(ctx: AppContext): Command {
                     if (!targetChannel) {
                         await interaction.editReply({
                             components: [plainTextContainer(t('invite.error_invalid_channel_type'), 0xed4245)],
+                            flags: MessageFlags.IsComponentsV2,
                         });
                         return;
                     }
@@ -156,6 +154,7 @@ export function buildInviteCommand(ctx: AppContext): Command {
                                     0xed4245,
                                 ),
                             ],
+                            flags: MessageFlags.IsComponentsV2,
                         });
                         return;
                     }
@@ -193,7 +192,7 @@ export function buildInviteCommand(ctx: AppContext): Command {
                         td.setContent(`-# ${t('invite.footer_success', {}, guildLocale)}`),
                     );
 
-                await interaction.editReply({ components: [container] });
+                await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
                 logInfo(`${logPrefix} Served invite ${inviteCode} (validated=${validated}, pending=${pending}).`);
             } catch (err) {
                 logError(`${logPrefix} Critical error in /invite:`, err);
@@ -211,6 +210,7 @@ export function buildInviteCommand(ctx: AppContext): Command {
                                 0xed4245,
                             ),
                         ],
+                        flags: MessageFlags.IsComponentsV2,
                     });
                 } catch (replyErr) {
                     logError(`${logPrefix} Failed to send error reply:`, replyErr);

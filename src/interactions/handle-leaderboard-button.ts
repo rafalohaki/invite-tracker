@@ -1,4 +1,4 @@
-import type { ButtonInteraction } from 'discord.js';
+import { type ButtonInteraction, MessageFlags } from 'discord.js';
 import { renderLeaderboardPage } from '@/commands/leaderboard.ts';
 import type { AppContext } from '@/types/discord.ts';
 import { logError, logInfo } from '@/utils/logger.ts';
@@ -13,10 +13,11 @@ export async function handleLeaderboardButton(interaction: ButtonInteraction, ct
     const prefix = `[LeaderboardBtn][Guild:${interaction.guild.id}][User:${interaction.user.id}]`;
 
     try {
-        // deferUpdate inherits the parent message's flags — Components v2 stays set.
+        // The parent message is already CV2 (cannot opt out when editing); passing the
+        // flag again on editReply is the documented, explicit form.
         await interaction.deferUpdate();
         const { components, rowsOnPage } = await renderLeaderboardPage(ctx, interaction.guild, newPage, state.period);
-        await interaction.editReply({ components });
+        await interaction.editReply({ components, flags: MessageFlags.IsComponentsV2 });
         logInfo(`${prefix} Navigated to page ${newPage} (period=${state.period}, rows=${rowsOnPage}).`);
     } catch (err) {
         logError(`${prefix} Failed to handle pagination:`, err);

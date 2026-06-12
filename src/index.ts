@@ -41,7 +41,9 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
         logError('Failed to stop validation scheduler:', err);
     }
     try {
-        client.destroy();
+        // destroy() returns Promise<void> (closes the gateway + REST agent) — await it
+        // so the DB close below happens after Discord teardown completes.
+        await client.destroy();
         logInfo('Discord client destroyed.');
     } catch (err) {
         logError('Failed to destroy client:', err);

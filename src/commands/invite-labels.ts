@@ -16,6 +16,8 @@ import { logError, logInfo } from '@/utils/logger.ts';
 import { canAssignRole } from '@/utils/permissions.ts';
 
 const MAX_LABEL_LENGTH = 50;
+/** CV2 messages allow at most 40 components total — cap list entries with headroom. */
+const MAX_LISTED_LABELS = 30;
 
 /** Accepts a bare code or a full invite URL (with or without protocol) and returns the bare code. */
 export function normalizeInviteCode(input: string): string {
@@ -154,20 +156,26 @@ export function buildInviteLabelsCommand(ctx: AppContext): Command {
                         });
                         return;
                     }
+                    // Discord caps CV2 messages at 40 components total — keep headroom
+                    // for the header/separators/footer.
+                    const shown = rows.slice(0, MAX_LISTED_LABELS);
                     const container = new ContainerBuilder()
                         .setAccentColor(EMBED_COLORS.labels)
                         .addTextDisplayComponents((td) => td.setContent(`## 🏷️ Invite labels for ${guild.name}`))
                         .addSeparatorComponents((s) => s.setSpacing(SeparatorSpacingSize.Small));
-                    for (const r of rows) {
+                    for (const r of shown) {
                         const rolePart = r.autoRoleId ? ` → auto-role <@&${r.autoRoleId}>` : '';
                         container.addTextDisplayComponents((td) =>
                             td.setContent(`**${r.label}** — \`discord.gg/${r.inviteCode}\`${rolePart}`),
                         );
                     }
+                    const overflow = rows.length - shown.length;
                     container
                         .addSeparatorComponents((s) => s.setSpacing(SeparatorSpacingSize.Small))
                         .addTextDisplayComponents((td) =>
-                            td.setContent(`-# ${rows.length} label(s) · see \`/invite-sources\` for join counts`),
+                            td.setContent(
+                                `-# ${rows.length} label(s)${overflow > 0 ? ` (showing first ${shown.length})` : ''} · see \`/invite-sources\` for join counts`,
+                            ),
                         );
                     await interaction.reply({
                         components: [container],
