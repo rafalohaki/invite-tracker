@@ -26,6 +26,7 @@ export function registerGuildDelete(client: AppClient, ctx: AppContext): void {
             ctx.repos.joinHistory.deleteAllInGuild(guildId);
             ctx.repos.roleRewards.deleteAllInGuild(guildId);
             ctx.repos.bonusInvites.deleteAllInGuild(guildId);
+            ctx.repos.inviteLabels.deleteAllInGuild(guildId);
             ctx.repos.guildConfig.deleteForGuild(guildId);
         } catch (err) {
             logError(`[GuildDelete][Guild:${guildId ?? 'unknown'}] cleanup failed:`, err);

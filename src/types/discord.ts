@@ -9,6 +9,7 @@ import type {
 } from 'discord.js';
 import type { BonusInvitesRepository } from '@/db/repositories/bonus-invites.ts';
 import type { GuildConfigRepository } from '@/db/repositories/guild-config.ts';
+import type { InviteLabelsRepository } from '@/db/repositories/invite-labels.ts';
 import type { JoinHistoryRepository } from '@/db/repositories/join-history.ts';
 import type { RoleRewardsRepository } from '@/db/repositories/role-rewards.ts';
 import type { TrackedJoinsRepository } from '@/db/repositories/tracked-joins.ts';
@@ -21,6 +22,7 @@ export interface Repositories {
     roleRewards: RoleRewardsRepository;
     joinHistory: JoinHistoryRepository;
     bonusInvites: BonusInvitesRepository;
+    inviteLabels: InviteLabelsRepository;
 }
 
 /** Container passed to every command/event handler — pure DI, no module-level state. */

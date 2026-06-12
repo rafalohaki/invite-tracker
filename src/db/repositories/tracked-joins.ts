@@ -17,6 +17,7 @@ export class TrackedJoinsRepository {
     private readonly stmtGetPending;
     private readonly stmtGetByInvitee;
     private readonly stmtListByInviter;
+    private readonly stmtListAllInGuild;
     private readonly stmtStatusTotals;
     private readonly stmtUpsert;
     private readonly stmtMarkLeftEarly;
@@ -39,6 +40,9 @@ export class TrackedJoinsRepository {
         );
         this.stmtListByInviter = db.query<TrackedJoinRow, [string, string, number]>(
             'SELECT * FROM TrackedJoins WHERE guildId = ? AND inviterId = ? ORDER BY joinTimestamp DESC, id DESC LIMIT ?',
+        );
+        this.stmtListAllInGuild = db.query<TrackedJoinRow, [string, number]>(
+            'SELECT * FROM TrackedJoins WHERE guildId = ? ORDER BY joinTimestamp DESC, id DESC LIMIT ?',
         );
         this.stmtStatusTotals = db.query<{ status: JoinStatus; count: number }, [string]>(
             'SELECT status, COUNT(*) as count FROM TrackedJoins WHERE guildId = ? GROUP BY status',
@@ -143,6 +147,11 @@ export class TrackedJoinsRepository {
     /** Most recent joins attributed to an inviter, any status, newest first. */
     listByInviter(guildId: string, inviterId: string, limit: number): TrackedJoinRow[] {
         return this.stmtListByInviter.all(guildId, inviterId, limit);
+    }
+
+    /** Every tracked join in a guild, newest first, capped by limit (CSV export). */
+    listAllInGuild(guildId: string, limit: number): TrackedJoinRow[] {
+        return this.stmtListAllInGuild.all(guildId, limit);
     }
 
     /** Guild-wide join counts per status (absent statuses are 0). */

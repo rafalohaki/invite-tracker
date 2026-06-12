@@ -70,3 +70,17 @@ export interface LeaderboardEntryRow {
     inviterId: string;
     count: number;
 }
+
+export interface InviteLabelRow {
+    guildId: string;
+    inviteCode: string;
+    label: string;
+    autoRoleId: string | null;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface LabelSourceStatRow {
+    label: string;
+    count: number;
+}

@@ -3,8 +3,9 @@ import { INVITE_FETCH_DELAY_MS } from '@/config/constants.ts';
 import { detectRejoin } from '@/services/anti-cheat.ts';
 import { isAccountTooYoung } from '@/services/anti-fake.ts';
 import { type JoinLogDetails, type JoinLogKind, renderJoinLogLine, sendEventLog } from '@/services/event-log.ts';
-import { findUsedInviteAndStale } from '@/services/invite-attribution.ts';
+import { findUsedCodeAcrossAll, findUsedInviteAndStale } from '@/services/invite-attribution.ts';
 import { cacheGuildInvites, ensureCachedUses, fetchInvitesSafe } from '@/services/invite-cache.ts';
+import { applyLabelAutoRole } from '@/services/invite-labels.ts';
 import { sendWelcomeMessage } from '@/services/welcome.ts';
 import type { AppClient, AppContext } from '@/types/discord.ts';
 import { ensureFullMemberData } from '@/utils/discord-members.ts';
@@ -55,12 +56,22 @@ export function registerGuildMemberAdd(client: AppClient, ctx: AppContext): void
                 }
             }
 
+            // 2b. Source tracking: detect the used code across ALL guild invites (labels and
+            // auto-roles apply to arbitrary codes, not just bot-generated ones).
+            const usedCode = findUsedCodeAcrossAll(currentInvites ? currentUses : null, cachedUses);
+            const labelRow = usedCode ? ctx.repos.inviteLabels.get(guild.id, usedCode.code) : null;
+            if (labelRow) {
+                logInfo(`${prefix} Join source label: '${labelRow.label}' (code ${usedCode?.code}).`);
+            }
+            const sourceLabel = labelRow?.label ?? null;
+
             // 3. Compare against tracked bot-generated invites.
             const trackedInvites = ctx.repos.userInvites.getAllInGuild(guild.id);
             if (trackedInvites.length === 0) {
                 logInfo(`${prefix} No bot-tracked invites — recording without attribution.`);
-                ctx.repos.joinHistory.record(guild.id, user.id, null, null);
-                await postJoinLog('unattributed');
+                ctx.repos.joinHistory.record(guild.id, user.id, null, usedCode?.code ?? null);
+                if (labelRow) await applyLabelAutoRole(ctx, guild, member, labelRow);
+                await postJoinLog('unattributed', { sourceLabel });
                 await cacheGuildInvites(guild);
                 return;
             }
@@ -82,21 +93,30 @@ export function registerGuildMemberAdd(client: AppClient, ctx: AppContext): void
                 }
             }
 
-            // 5. Always record JoinHistory (with or without attribution). Capture id for potential flagging.
+            // 5. Always record JoinHistory (with or without inviter attribution). The used code
+            // from source tracking fills inviteCodeUsed even for non-bot invites, so label
+            // stats cover every detectable join. Capture id for potential flagging.
             const joinHistoryId = ctx.repos.joinHistory.record(
                 guild.id,
                 user.id,
                 attribution?.inviterId ?? null,
-                attribution?.inviteCode ?? null,
+                attribution?.inviteCode ?? usedCode?.code ?? null,
             );
+
+            // Auto-role for labeled invites — independent of inviter credit, but withheld
+            // from accounts flagged as fake below (no perks for throwaway accounts).
+            const cfgEarly = ctx.repos.guildConfig.getOrDefault(guild.id);
+            const isFake = isAccountTooYoung(user.createdTimestamp, cfgEarly.min_account_age_days);
+            if (labelRow && !isFake) {
+                await applyLabelAutoRole(ctx, guild, member, labelRow);
+            }
 
             // 6. If we attributed, run anti-fake + anti-cheat; flagged joins skip TrackedJoin/welcome.
             if (attribution) {
-                const cfg = ctx.repos.guildConfig.getOrDefault(guild.id);
-                const tooYoung = isAccountTooYoung(user.createdTimestamp, cfg.min_account_age_days);
+                const cfg = cfgEarly;
                 const verdict = detectRejoin(ctx, guild.id, user.id, attribution.inviterId, cfg.anti_cheat_window_days);
 
-                if (tooYoung) {
+                if (isFake) {
                     logWarn(
                         `${prefix} Anti-fake flag: account created ${user.createdAt?.toISOString() ?? '?'} is younger than ${cfg.min_account_age_days}d — no invite credit.`,
                     );
@@ -107,7 +127,7 @@ export function registerGuildMemberAdd(client: AppClient, ctx: AppContext): void
                         attribution.inviteCode,
                         'flagged',
                     );
-                    await postJoinLog('flagged_fake', { inviterId: attribution.inviterId });
+                    await postJoinLog('flagged_fake', { inviterId: attribution.inviterId, sourceLabel });
                 } else if (verdict.isSuspicious) {
                     logWarn(
                         `${prefix} Anti-cheat flag: ${user.id} previously invited by ${verdict.previousInviterId}, now by ${attribution.inviterId} within ${cfg.anti_cheat_window_days}d.`,
@@ -120,7 +140,7 @@ export function registerGuildMemberAdd(client: AppClient, ctx: AppContext): void
                         'flagged',
                     );
                     ctx.repos.joinHistory.flagAsRejoin(joinHistoryId);
-                    await postJoinLog('flagged_rejoin', { inviterId: attribution.inviterId });
+                    await postJoinLog('flagged_rejoin', { inviterId: attribution.inviterId, sourceLabel });
                 } else {
                     ctx.repos.trackedJoins.upsertPending(
                         guild.id,
@@ -145,6 +165,7 @@ export function registerGuildMemberAdd(client: AppClient, ctx: AppContext): void
                         inviterId: attribution.inviterId,
                         inviteCode: attribution.inviteCode,
                         inviterTotal,
+                        sourceLabel,
                     });
 
                     // Send welcome message (best effort — fetch inviter as a User, not a member of THIS guild,
@@ -159,7 +180,7 @@ export function registerGuildMemberAdd(client: AppClient, ctx: AppContext): void
                     }
                 }
             } else {
-                await postJoinLog('unattributed');
+                await postJoinLog('unattributed', { sourceLabel });
             }
 
             // 7. Refresh cache so the next join sees the new counts.

@@ -86,6 +86,13 @@ en: # Default English strings (MUST be present)
     join_flagged_rejoin: "🚩 {user} rejoined via a different inviter ({inviter}) — flagged, no credit."
     leave_attributed: "📤 {user} left — was invited by {inviter}."
     leave_unattributed: "📤 {user} left."
+    source_suffix: " · 🏷️ source: {label}"
+
+  ## Invite Sources Command
+  sources:
+    embed_title: "Join sources for {guild_name}"
+    no_labels: "No labeled invites yet. Admins can label invites with `/invite-labels add` to track where members come from."
+    other_line: "Unlabeled / unknown source: `{count}` of `{total}` recorded joins."
 
   ## General Bot Strings
   general: # <-- CORRECT PARENT SECTION
@@ -182,6 +189,13 @@ custom: # Add your custom language translations here
     join_flagged_rejoin: "🚩 {user} wrócił(a) przez innego zapraszającego ({inviter}) — oflagowane, bez zaliczenia."
     leave_attributed: "📤 {user} wyszedł/wyszła — zaproszenie od {inviter}."
     leave_unattributed: "📤 {user} wyszedł/wyszła."
+    source_suffix: " · 🏷️ źródło: {label}"
+
+  ## Invite Sources Command
+  sources:
+    embed_title: "Źródła dołączeń dla {guild_name}"
+    no_labels: "Brak oznaczonych zaproszeń. Administratorzy mogą oznaczać zaproszenia komendą `/invite-labels add`, aby śledzić skąd przychodzą członkowie."
+    other_line: "Bez etykiety / nieznane źródło: `{count}` z `{total}` zarejestrowanych dołączeń."
 
   ## General Bot Strings
   general:

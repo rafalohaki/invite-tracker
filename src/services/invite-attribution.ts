@@ -21,6 +21,37 @@ interface SingleInviteCheck {
     inviteCode: string;
 }
 
+export interface UsedCodeResult {
+    code: string;
+    ambiguous: boolean;
+}
+
+/**
+ * Detect which invite code (ANY guild invite, not just bot-tracked ones) was used,
+ * by diffing current vs cached use counts. Powers invite-label source tracking and
+ * auto-roles, which apply to arbitrary codes.
+ *
+ * A code is a candidate when its count increased, or when it's new since the last
+ * cache refresh and already has uses. With multiple candidates the first is returned
+ * with `ambiguous: true` (same trade-off as inviter attribution). Pure function.
+ */
+export function findUsedCodeAcrossAll(
+    currentUses: Map<string, number> | null,
+    cachedUses: Map<string, number> | null,
+): UsedCodeResult | null {
+    if (!currentUses || !cachedUses) return null;
+    const candidates: string[] = [];
+    for (const [code, uses] of currentUses) {
+        const cached = cachedUses.get(code);
+        if (cached !== undefined ? uses > cached : uses > 0) {
+            candidates.push(code);
+        }
+    }
+    // biome-ignore lint/style/noNonNullAssertion: length checked above
+    if (candidates.length >= 1) return { code: candidates[0]!, ambiguous: candidates.length > 1 };
+    return null;
+}
+
 /** Inspect one tracked invite against current vs cached use counts. Pure function. */
 export function checkSingleInvite(
     userInvite: UserInviteRow,

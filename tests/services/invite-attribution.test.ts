@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { checkSingleInvite, findUsedInviteAndStale } from '@/services/invite-attribution.ts';
+import { checkSingleInvite, findUsedCodeAcrossAll, findUsedInviteAndStale } from '@/services/invite-attribution.ts';
 import type { UserInviteRow } from '@/types/db.ts';
 
 function ui(userId: string, code: string): UserInviteRow {
@@ -124,5 +124,53 @@ describe('findUsedInviteAndStale', () => {
         );
         expect(r.attribution).toBeNull();
         expect(r.staleInviteCodes.sort()).toEqual(['AAA', 'BBB']);
+    });
+});
+
+describe('findUsedCodeAcrossAll', () => {
+    it('returns null when either map is missing', () => {
+        expect(findUsedCodeAcrossAll(null, new Map())).toBeNull();
+        expect(findUsedCodeAcrossAll(new Map(), null)).toBeNull();
+    });
+
+    it('detects the single incremented code (any invite, not just tracked)', () => {
+        const current = new Map([
+            ['AAA', 5],
+            ['BBB', 3],
+        ]);
+        const cached = new Map([
+            ['AAA', 5],
+            ['BBB', 2],
+        ]);
+        expect(findUsedCodeAcrossAll(current, cached)).toEqual({ code: 'BBB', ambiguous: false });
+    });
+
+    it('treats a new code with uses > 0 as a candidate (cache miss)', () => {
+        const current = new Map([['NEW', 1]]);
+        const cached = new Map<string, number>();
+        expect(findUsedCodeAcrossAll(current, cached)).toEqual({ code: 'NEW', ambiguous: false });
+    });
+
+    it('ignores a new code with zero uses', () => {
+        const current = new Map([['NEW', 0]]);
+        expect(findUsedCodeAcrossAll(current, new Map())).toBeNull();
+    });
+
+    it('flags ambiguity when multiple codes incremented', () => {
+        const current = new Map([
+            ['AAA', 2],
+            ['BBB', 2],
+        ]);
+        const cached = new Map([
+            ['AAA', 1],
+            ['BBB', 1],
+        ]);
+        const r = findUsedCodeAcrossAll(current, cached);
+        expect(r?.ambiguous).toBe(true);
+    });
+
+    it('returns null when nothing changed', () => {
+        const same = new Map([['AAA', 4]]);
+        expect(findUsedCodeAcrossAll(same, new Map(same))).toBeNull();
     });
 });

@@ -32,6 +32,14 @@ describe('renderJoinLogLine', () => {
         const line = renderJoinLogLine('unattributed', { userId: 'u1' }, 'custom');
         expect(line).toContain('dołączył');
     });
+
+    it('appends the source label suffix when present', () => {
+        const line = renderJoinLogLine('unattributed', { userId: 'u1', sourceLabel: 'YouTube' }, 'en');
+        expect(line).toContain('🏷️');
+        expect(line).toContain('YouTube');
+        const without = renderJoinLogLine('unattributed', { userId: 'u1' }, 'en');
+        expect(without).not.toContain('🏷️');
+    });
 });
 
 describe('renderLeaveLogLine', () => {

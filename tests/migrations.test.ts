@@ -23,6 +23,7 @@ describe('migrations', () => {
         expect(tables).toContain('RoleRewards');
         expect(tables).toContain('JoinHistory');
         expect(tables).toContain('BonusInvites');
+        expect(tables).toContain('InviteLabels');
     });
 
     it('records every applied migration in _migrations', () => {
@@ -37,6 +38,7 @@ describe('migrations', () => {
             '004_join_history.sql',
             '005_bonus_invites.sql',
             '006_guild_config_extensions.sql',
+            '007_invite_labels.sql',
         ]);
     });
 

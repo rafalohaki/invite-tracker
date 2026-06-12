@@ -15,6 +15,7 @@ export const EMBED_COLORS = {
     whoInvited: 0x0099ff,
     invited: 0x0099ff,
     stats: 0xeb459e,
+    labels: 0xfee75c,
 } as const;
 
 /** One emoji per TrackedJoin status — shared by /invited, /who-invited, /server-stats. */

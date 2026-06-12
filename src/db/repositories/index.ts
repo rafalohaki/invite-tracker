@@ -2,6 +2,7 @@ import type { Database } from 'bun:sqlite';
 import type { Repositories } from '@/types/discord.ts';
 import { BonusInvitesRepository } from './bonus-invites.ts';
 import { GuildConfigRepository } from './guild-config.ts';
+import { InviteLabelsRepository } from './invite-labels.ts';
 import { JoinHistoryRepository } from './join-history.ts';
 import { RoleRewardsRepository } from './role-rewards.ts';
 import { TrackedJoinsRepository } from './tracked-joins.ts';
@@ -21,5 +22,6 @@ export function createRepositories(db: Database): Repositories {
         roleRewards: new RoleRewardsRepository(db),
         joinHistory: new JoinHistoryRepository(db),
         bonusInvites: new BonusInvitesRepository(db),
+        inviteLabels: new InviteLabelsRepository(db),
     };
 }

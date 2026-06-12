@@ -19,6 +19,9 @@ A Discord bot that tracks user-generated invites, validates joins after a config
 | `/server-stats` | Public server-wide stats: joins per status, lifetime joins/leaves, flagged rejoins, top inviter. |
 | `/check <user>` | _(admin)_ Inspect another user's invite stats, including flagged rejoins. |
 | `/bonus add\|remove <user> <amount> \| show <user>` | _(Manage Guild)_ Grant or revoke bonus invites; counts toward totals and role rewards. |
+| `/invite-labels add <code> <label> [role] \| remove <code> \| list` | _(Manage Guild)_ Label any invite ("YouTube", "Twitter"…) to track join sources; optional auto-role for members joining via that invite. |
+| `/invite-sources` | Public bar chart of joins per labeled invite — see where members come from. |
+| `/export leaderboard\|joins` | _(Manage Guild)_ CSV export: full leaderboard (validated/bonus/total + display names) or raw tracked joins. |
 | `/config get \| set <key> <value> \| reset <key>` | _(Manage Guild)_ Per-guild configuration with autocomplete on `key`. |
 | `/role-rewards add <threshold> <role> \| remove <threshold> \| list` | _(Manage Guild)_ Grant a role automatically when an inviter reaches N invites (validated + bonus). |
 
@@ -28,7 +31,8 @@ Behind the scenes:
 - **Anti-cheat rejoin detection** — if the same user leaves and rejoins via a *different* inviter inside the `anti_cheat_window_days` window (default 30), the new join is recorded as `flagged` and earns no validated credit. Visible in `/check`.
 - **Anti-fake account-age filter** — when `min_account_age_days` is set, joins from Discord accounts younger than the threshold are `flagged` and earn no credit.
 - **Bonus invites** — admins can add/remove credit per user. The `all` leaderboard, `/invite`, `/check`, role rewards and the welcome `{count}` all use validated + bonus.
-- **Join/leave log** — set `log_channel_id` and the bot posts a line for every join (with inviter attribution, fake/rejoin flags) and every leave. Mentions never ping.
+- **Join/leave log** — set `log_channel_id` and the bot posts a line for every join (with inviter attribution, fake/rejoin flags and source label) and every leave. Mentions never ping.
+- **Invite labels (source tracking)** — label any invite code and the bot detects which code each join used (diffing use counts across *all* guild invites, not just bot-generated ones), records it in `JoinHistory`, and can auto-assign a role per label. Fake-flagged accounts never receive auto-roles.
 - **Live invite cache** — `InviteCreate`/`InviteDelete` gateway events keep the uses cache fresh and purge deleted bot invites from the DB immediately.
 - **Role rewards** — checked on every promotion to `validated` and on every `/bonus add`. Bulk `member.roles.add(array)` for rate-limit friendliness; hierarchy + permission check before every grant.
 - **i18n** — every user-facing string lives in `src/i18n/custom-lang.yaml` (English + Polish `custom` section). Global default via `LOCALE_LANG`; per-guild override via `/config set locale custom|en`.
@@ -115,7 +119,7 @@ docker compose -f deploy/docker-compose.yml run --rm bot bun src/deploy-commands
 
 ```bash
 bun run dev        # bun --watch src/index.ts
-bun run test       # bun test (113 tests, in-memory SQLite, zero Discord I/O)
+bun run test       # bun test (133 tests, in-memory SQLite, zero Discord I/O)
 bun run lint       # Biome v2 (lint + format)
 bun run lint:fix   # auto-fix lint + format
 bun run typecheck  # tsc --noEmit
@@ -136,8 +140,8 @@ src/
 ├── db/
 │   ├── client.ts           # createDb(path) factory; not a singleton (testable)
 │   ├── migration-runner.ts # idempotent SQL migration runner
-│   ├── migrations/*.sql    # 6 forward migrations (no down migrations)
-│   └── repositories/*.ts   # 6 typed repositories + createRepositories(db) factory
+│   ├── migrations/*.sql    # 7 forward migrations (no down migrations)
+│   └── repositories/*.ts   # 7 typed repositories + createRepositories(db) factory
 ├── services/               # business logic, zero discord.js coupling where possible
 │   ├── invite-cache.ts
 │   ├── invite-attribution.ts
@@ -147,7 +151,7 @@ src/
 │   ├── role-rewards.ts     # hierarchy check + bulk roles.add
 │   ├── anti-cheat.ts       # rejoin detection
 │   └── anti-fake.ts        # account-age fake detection
-├── commands/               # 9 slash-command builders, factory pattern (ctx-injected)
+├── commands/               # 12 slash-command builders, factory pattern (ctx-injected)
 ├── events/                 # 7 event handlers (ready / interaction / guild × 2 / member × 2 / invites)
 ├── interactions/           # button + autocomplete handlers
 ├── i18n/{translator, custom-lang.yaml}
@@ -187,6 +191,7 @@ Tables:
 - **`RoleRewards`** — `(guildId, threshold, roleId)` with UNIQUE constraint.
 - **`JoinHistory`** — full audit trail with `flaggedAsRejoin` boolean.
 - **`BonusInvites`** — admin-granted net bonus per `(guildId, userId)`; may go negative.
+- **`InviteLabels`** — source label + optional auto-role per `(guildId, inviteCode)`.
 
 All `DEFAULT` clauses and write paths use `strftime('%Y-%m-%dT%H:%M:%fZ', 'now')` so timestamps match `Date.toISOString()` byte-for-byte — lexicographic comparison is guaranteed correct.
 

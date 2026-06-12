@@ -12,26 +12,37 @@ export interface JoinLogDetails {
     inviterId?: string | null;
     inviteCode?: string | null;
     inviterTotal?: number;
+    /** Invite-label source name (e.g. "YouTube") when the used code is labeled. */
+    sourceLabel?: string | null;
 }
 
 /** Pure renderer — exported separately so tests can hit it without a Discord mock. */
 export function renderJoinLogLine(kind: JoinLogKind, details: JoinLogDetails, locale?: Locale): string {
     const user = `<@${details.userId}>`;
     const inviter = details.inviterId ? `<@${details.inviterId}>` : '?';
+    let line: string;
     switch (kind) {
         case 'attributed':
-            return t(
+            line = t(
                 'log.join_attributed',
                 { user, inviter, code: details.inviteCode ?? '?', count: details.inviterTotal ?? 0 },
                 locale,
             );
+            break;
         case 'flagged_fake':
-            return t('log.join_flagged_fake', { user, inviter }, locale);
+            line = t('log.join_flagged_fake', { user, inviter }, locale);
+            break;
         case 'flagged_rejoin':
-            return t('log.join_flagged_rejoin', { user, inviter }, locale);
+            line = t('log.join_flagged_rejoin', { user, inviter }, locale);
+            break;
         default:
-            return t('log.join_unattributed', { user }, locale);
+            line = t('log.join_unattributed', { user }, locale);
+            break;
     }
+    if (details.sourceLabel) {
+        line += t('log.source_suffix', { label: details.sourceLabel }, locale);
+    }
+    return line;
 }
 
 /** Pure renderer for the leave line. */
