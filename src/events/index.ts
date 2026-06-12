@@ -6,6 +6,7 @@ import { registerGuildDelete } from './guild-delete.ts';
 import { registerGuildMemberAdd } from './guild-member-add.ts';
 import { registerGuildMemberRemove } from './guild-member-remove.ts';
 import { registerInteractionCreate } from './interaction-create.ts';
+import { registerInviteEvents } from './invite-events.ts';
 import { type ReadyHandles, registerReady } from './ready.ts';
 
 export function registerEvents(client: AppClient, ctx: AppContext): ReadyHandles {
@@ -16,6 +17,7 @@ export function registerEvents(client: AppClient, ctx: AppContext): ReadyHandles
     registerGuildDelete(client, ctx);
     registerGuildMemberAdd(client, ctx);
     registerGuildMemberRemove(client, ctx);
+    registerInviteEvents(client, ctx);
 
     client.on(Events.Warn, (warning) => logWarn('[Discord Client Warn]', warning));
     client.on(Events.Error, (error) => logError('[Discord Client Error]', error));

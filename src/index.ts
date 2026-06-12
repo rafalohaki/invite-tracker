@@ -2,11 +2,7 @@ import { createClient } from '@/client.ts';
 import { buildCommands } from '@/commands/index.ts';
 import { env } from '@/config/env.ts';
 import { createDb } from '@/db/client.ts';
-import { GuildConfigRepository } from '@/db/repositories/guild-config.ts';
-import { JoinHistoryRepository } from '@/db/repositories/join-history.ts';
-import { RoleRewardsRepository } from '@/db/repositories/role-rewards.ts';
-import { TrackedJoinsRepository } from '@/db/repositories/tracked-joins.ts';
-import { UserInvitesRepository } from '@/db/repositories/user-invites.ts';
+import { createRepositories } from '@/db/repositories/index.ts';
 import { registerEvents } from '@/events/index.ts';
 import { loadTranslations } from '@/i18n/translator.ts';
 import type { AppContext } from '@/types/discord.ts';
@@ -24,16 +20,7 @@ logInfo(`[Config] Anti-cheat window (default): ${env.ANTI_CHEAT_WINDOW_DAYS}d`);
 loadTranslations();
 
 const db = createDb(env.DATABASE_PATH);
-const ctx: AppContext = {
-    db,
-    repos: {
-        userInvites: new UserInvitesRepository(db),
-        trackedJoins: new TrackedJoinsRepository(db),
-        guildConfig: new GuildConfigRepository(db),
-        roleRewards: new RoleRewardsRepository(db),
-        joinHistory: new JoinHistoryRepository(db),
-    },
-};
+const ctx: AppContext = { db, repos: createRepositories(db) };
 
 const client = createClient();
 for (const command of buildCommands(ctx)) {

@@ -6,31 +6,17 @@
  * Otherwise deploys globally (may take up to 1h to propagate).
  */
 import { REST, Routes } from 'discord.js';
-import { createClient } from '@/client.ts';
 import { buildCommands } from '@/commands/index.ts';
 import { env } from '@/config/env.ts';
 import { createDb } from '@/db/client.ts';
-import { GuildConfigRepository } from '@/db/repositories/guild-config.ts';
-import { JoinHistoryRepository } from '@/db/repositories/join-history.ts';
-import { RoleRewardsRepository } from '@/db/repositories/role-rewards.ts';
-import { TrackedJoinsRepository } from '@/db/repositories/tracked-joins.ts';
-import { UserInvitesRepository } from '@/db/repositories/user-invites.ts';
+import { createRepositories } from '@/db/repositories/index.ts';
 import type { AppContext } from '@/types/discord.ts';
 import { logError, logInfo } from '@/utils/logger.ts';
 
 // We only need command metadata to deploy, not a live DB. But buildCommands(ctx) wants ctx,
 // so we create a throwaway in-memory DB rather than touching the real one.
 const db = createDb(':memory:');
-const ctx: AppContext = {
-    db,
-    repos: {
-        userInvites: new UserInvitesRepository(db),
-        trackedJoins: new TrackedJoinsRepository(db),
-        guildConfig: new GuildConfigRepository(db),
-        roleRewards: new RoleRewardsRepository(db),
-        joinHistory: new JoinHistoryRepository(db),
-    },
-};
+const ctx: AppContext = { db, repos: createRepositories(db) };
 
 const commands = buildCommands(ctx);
 const payload = commands.map((c) => c.data.toJSON());
@@ -58,5 +44,3 @@ async function main() {
 }
 
 await main();
-// Silence client unused-import warning if biome flags it; createClient is exported for parity.
-void createClient;

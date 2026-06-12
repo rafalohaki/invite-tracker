@@ -66,7 +66,7 @@ export function buildCheckCommand(ctx: AppContext): Command {
 
                 const inviteLine = inviteCode
                     ? `🔗 **${t('check.link_field_name', {}, guildLocale)}** https://discord.gg/${inviteCode}`
-                    : `🔗 ${t('check.error_no_invite_value', { user_tag: targetUser.username }, guildLocale)}`;
+                    : `🔗 ${t('check.error_no_invite', { user_tag: targetUser.username }, guildLocale)}`;
 
                 const container = new ContainerBuilder()
                     .setAccentColor(EMBED_COLORS.check)

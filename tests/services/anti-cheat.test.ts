@@ -1,25 +1,12 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
-import { GuildConfigRepository } from '@/db/repositories/guild-config.ts';
-import { JoinHistoryRepository } from '@/db/repositories/join-history.ts';
-import { RoleRewardsRepository } from '@/db/repositories/role-rewards.ts';
-import { TrackedJoinsRepository } from '@/db/repositories/tracked-joins.ts';
-import { UserInvitesRepository } from '@/db/repositories/user-invites.ts';
+import { createRepositories } from '@/db/repositories/index.ts';
 import { detectRejoin } from '@/services/anti-cheat.ts';
 import type { AppContext } from '@/types/discord.ts';
 import { createTestDb } from '../helpers/in-memory-db.ts';
 
 function makeCtx(): AppContext {
     const db = createTestDb();
-    return {
-        db,
-        repos: {
-            userInvites: new UserInvitesRepository(db),
-            trackedJoins: new TrackedJoinsRepository(db),
-            guildConfig: new GuildConfigRepository(db),
-            roleRewards: new RoleRewardsRepository(db),
-            joinHistory: new JoinHistoryRepository(db),
-        },
-    };
+    return { db, repos: createRepositories(db) };
 }
 
 describe('detectRejoin', () => {

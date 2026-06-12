@@ -95,19 +95,32 @@ export async function runValidation(client: AppClient, ctx: AppContext): Promise
     return promotedByInviter;
 }
 
+export interface ValidationScheduler {
+    cancel(): void;
+}
+
 /**
- * Install the periodic scheduler. Returns the timer handle so callers (graceful shutdown)
- * can clear it. Runs an initial pass 2 minutes after startup, then on the configured cadence.
+ * Install the periodic scheduler. `cancel()` clears BOTH the initial-delay timeout and
+ * the recurring interval — a shutdown inside the first 2 minutes must not let the
+ * initial pass fire against a destroyed client.
+ * Runs an initial pass 2 minutes after startup, then on the configured cadence.
  */
-export function startValidationScheduler(client: AppClient, ctx: AppContext): NodeJS.Timeout {
+export function startValidationScheduler(client: AppClient, ctx: AppContext): ValidationScheduler {
     const intervalMs = env.VALIDATION_CHECK_INTERVAL_MINUTES * 60 * 1000;
     logInfo(`[ValidationTask] Scheduler armed: every ${env.VALIDATION_CHECK_INTERVAL_MINUTES} min.`);
 
-    setTimeout(() => {
+    const initialTimeout = setTimeout(() => {
         runValidation(client, ctx).catch((err) => logError('[ValidationTask] Initial pass failed:', err));
     }, INITIAL_VALIDATION_DELAY_MS);
 
-    return setInterval(() => {
+    const interval = setInterval(() => {
         runValidation(client, ctx).catch((err) => logError('[ValidationTask] Periodic pass failed:', err));
     }, intervalMs);
+
+    return {
+        cancel() {
+            clearTimeout(initialTimeout);
+            clearInterval(interval);
+        },
+    };
 }

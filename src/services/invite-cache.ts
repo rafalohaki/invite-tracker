@@ -44,6 +44,20 @@ export function getCachedUses(guildId: string): Map<string, number> | undefined 
     return inviteUsesCache.get(guildId);
 }
 
+/**
+ * Records a single invite's use count without a full refetch — fed by the
+ * InviteCreate gateway event. No-op when the guild has no cache yet (the next
+ * full rebuild will pick the invite up anyway).
+ */
+export function setCachedUse(guildId: string, inviteCode: string, uses: number): void {
+    inviteUsesCache.get(guildId)?.set(inviteCode, uses);
+}
+
+/** Drops a single invite from the cache — fed by the InviteDelete gateway event. */
+export function removeCachedUse(guildId: string, inviteCode: string): void {
+    inviteUsesCache.get(guildId)?.delete(inviteCode);
+}
+
 /** Returns the cached map, building it on demand. Null on permanent failure. */
 export async function ensureCachedUses(guild: Guild): Promise<Map<string, number> | null> {
     const prefix = `[InviteCache][Guild:${guild.id}]`;

@@ -33,8 +33,8 @@ export function registerReady(client: AppClient, ctx: AppContext, handles: Ready
             }
             logInfo(`[Ready] Initial caching done: ${ok} ok, ${failed} failed/no-perm.`);
 
-            const interval = startValidationScheduler(client, ctx);
-            handles.cancelValidation = () => clearInterval(interval);
+            const scheduler = startValidationScheduler(client, ctx);
+            handles.cancelValidation = () => scheduler.cancel();
         } catch (err) {
             logError('[Ready] Critical error during init:', err);
         }
