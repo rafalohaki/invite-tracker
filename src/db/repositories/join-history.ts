@@ -7,6 +7,8 @@ export class JoinHistoryRepository {
     private readonly stmtGetRecentRejoin;
     private readonly stmtFlagAsRejoin;
     private readonly stmtGetFlaggedForUser;
+    private readonly stmtGetLatestForUser;
+    private readonly stmtGuildStats;
     private readonly stmtDeleteAllInGuild;
 
     constructor(db: Database) {
@@ -43,6 +45,19 @@ export class JoinHistoryRepository {
              WHERE guildId = ? AND userId = ? AND flaggedAsRejoin = 1
              ORDER BY joinTimestamp DESC`,
         );
+        this.stmtGetLatestForUser = db.query<JoinHistoryRow, [string, string]>(
+            `SELECT * FROM JoinHistory
+             WHERE guildId = ? AND userId = ?
+             ORDER BY id DESC
+             LIMIT 1`,
+        );
+        this.stmtGuildStats = db.query<{ joins: number; leaves: number; flaggedRejoins: number }, [string]>(
+            `SELECT COUNT(*) as joins,
+                    COUNT(leftTimestamp) as leaves,
+                    SUM(flaggedAsRejoin) as flaggedRejoins
+             FROM JoinHistory
+             WHERE guildId = ?`,
+        );
         this.stmtDeleteAllInGuild = db.prepare<unknown, [string]>('DELETE FROM JoinHistory WHERE guildId = ?');
     }
 
@@ -69,6 +84,21 @@ export class JoinHistoryRepository {
 
     getFlaggedForUser(guildId: string, userId: string): JoinHistoryRow[] {
         return this.stmtGetFlaggedForUser.all(guildId, userId);
+    }
+
+    /** Newest history record for a user (joined or left), or null if never seen. */
+    getLatestForUser(guildId: string, userId: string): JoinHistoryRow | null {
+        return this.stmtGetLatestForUser.get(guildId, userId) ?? null;
+    }
+
+    /** Lifetime guild totals: recorded joins, completed leaves, flagged rejoins. */
+    guildStats(guildId: string): { joins: number; leaves: number; flaggedRejoins: number } {
+        const row = this.stmtGuildStats.get(guildId);
+        return {
+            joins: row?.joins ?? 0,
+            leaves: row?.leaves ?? 0,
+            flaggedRejoins: row?.flaggedRejoins ?? 0,
+        };
     }
 
     deleteAllInGuild(guildId: string): number {

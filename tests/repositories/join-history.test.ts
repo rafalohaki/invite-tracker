@@ -60,4 +60,23 @@ describe('JoinHistoryRepository', () => {
         expect(repo.deleteAllInGuild('g1')).toBe(1);
         expect(repo.getFlaggedForUser('g2', 'u2')).toEqual([]); // not flagged but row exists
     });
+    describe('lookup + stats helpers', () => {
+        it('getLatestForUser returns the newest record or null', () => {
+            expect(repo.getLatestForUser('g1', 'u1')).toBeNull();
+            repo.record('g1', 'u1', 'inv1', 'A');
+            const idB = repo.record('g1', 'u1', 'inv2', 'B');
+            expect(repo.getLatestForUser('g1', 'u1')?.id).toBe(idB);
+            expect(repo.getLatestForUser('g1', 'u1')?.inviterId).toBe('inv2');
+        });
+
+        it('guildStats counts joins, leaves and flagged rejoins', () => {
+            expect(repo.guildStats('g1')).toEqual({ joins: 0, leaves: 0, flaggedRejoins: 0 });
+            repo.record('g1', 'u1', 'inv1', 'A');
+            const idB = repo.record('g1', 'u2', 'inv1', 'A');
+            repo.record('g2', 'other', null, null);
+            repo.markLeft('g1', 'u1');
+            repo.flagAsRejoin(idB);
+            expect(repo.guildStats('g1')).toEqual({ joins: 2, leaves: 1, flaggedRejoins: 1 });
+        });
+    });
 });

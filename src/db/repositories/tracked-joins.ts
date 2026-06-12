@@ -15,6 +15,9 @@ const PERIOD_TO_DAYS: Record<Exclude<LeaderboardPeriod, 'all'>, number> = {
 
 export class TrackedJoinsRepository {
     private readonly stmtGetPending;
+    private readonly stmtGetByInvitee;
+    private readonly stmtListByInviter;
+    private readonly stmtStatusTotals;
     private readonly stmtUpsert;
     private readonly stmtMarkLeftEarly;
     private readonly stmtFindCandidates;
@@ -30,6 +33,15 @@ export class TrackedJoinsRepository {
     constructor(private readonly db: Database) {
         this.stmtGetPending = db.query<TrackedJoinRow, [string, string]>(
             "SELECT * FROM TrackedJoins WHERE guildId = ? AND inviteeId = ? AND status = 'pending'",
+        );
+        this.stmtGetByInvitee = db.query<TrackedJoinRow, [string, string]>(
+            'SELECT * FROM TrackedJoins WHERE guildId = ? AND inviteeId = ?',
+        );
+        this.stmtListByInviter = db.query<TrackedJoinRow, [string, string, number]>(
+            'SELECT * FROM TrackedJoins WHERE guildId = ? AND inviterId = ? ORDER BY joinTimestamp DESC, id DESC LIMIT ?',
+        );
+        this.stmtStatusTotals = db.query<{ status: JoinStatus; count: number }, [string]>(
+            'SELECT status, COUNT(*) as count FROM TrackedJoins WHERE guildId = ? GROUP BY status',
         );
         this.stmtUpsert = db.prepare<unknown, [string, string, string, string, JoinStatus]>(
             `INSERT INTO TrackedJoins (guildId, inviteeId, inviterId, inviteCodeUsed, status, joinTimestamp)
@@ -121,6 +133,25 @@ export class TrackedJoinsRepository {
 
     getPending(guildId: string, inviteeId: string): TrackedJoinRow | null {
         return this.stmtGetPending.get(guildId, inviteeId) ?? null;
+    }
+
+    /** The (single, UNIQUE-constrained) tracked join for an invitee, regardless of status. */
+    getByInvitee(guildId: string, inviteeId: string): TrackedJoinRow | null {
+        return this.stmtGetByInvitee.get(guildId, inviteeId) ?? null;
+    }
+
+    /** Most recent joins attributed to an inviter, any status, newest first. */
+    listByInviter(guildId: string, inviterId: string, limit: number): TrackedJoinRow[] {
+        return this.stmtListByInviter.all(guildId, inviterId, limit);
+    }
+
+    /** Guild-wide join counts per status (absent statuses are 0). */
+    statusTotals(guildId: string): Record<JoinStatus, number> {
+        const totals: Record<JoinStatus, number> = { pending: 0, validated: 0, left_early: 0, flagged: 0 };
+        for (const row of this.stmtStatusTotals.all(guildId)) {
+            totals[row.status] = row.count;
+        }
+        return totals;
     }
 
     upsertPending(guildId: string, inviteeId: string, inviterId: string, inviteCode: string): void {

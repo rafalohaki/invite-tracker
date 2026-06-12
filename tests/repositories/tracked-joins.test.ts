@@ -103,4 +103,33 @@ describe('TrackedJoinsRepository', () => {
         const weekly = repo.getLeaderboard('g1', 10, 'week');
         expect(weekly).toEqual([{ inviterId: 'inviterA', count: 1 }]);
     });
+    describe('lookup helpers', () => {
+        it('getByInvitee returns the row regardless of status', () => {
+            repo.upsertWithStatus('g1', 'invitee1', 'inviter1', 'CODE', 'flagged');
+            const row = repo.getByInvitee('g1', 'invitee1');
+            expect(row?.inviterId).toBe('inviter1');
+            expect(row?.status).toBe('flagged');
+            expect(repo.getByInvitee('g1', 'nobody')).toBeNull();
+        });
+
+        it('listByInviter returns newest first, capped by limit', () => {
+            repo.upsertPending('g1', 'i1', 'inviterA', 'C1');
+            repo.upsertPending('g1', 'i2', 'inviterA', 'C2');
+            repo.upsertPending('g1', 'i3', 'inviterB', 'C3');
+            const rows = repo.listByInviter('g1', 'inviterA', 10);
+            expect(rows.map((r) => r.inviteeId).sort()).toEqual(['i1', 'i2']);
+            expect(repo.listByInviter('g1', 'inviterA', 1).length).toBe(1);
+            // Same-second inserts tie on joinTimestamp; id DESC breaks the tie -> newest first.
+            expect(repo.listByInviter('g1', 'inviterA', 10)[0]?.inviteeId).toBe('i2');
+        });
+
+        it('statusTotals aggregates per status with zeros for absent statuses', () => {
+            repo.upsertWithStatus('g1', 'i1', 'a', 'C', 'validated');
+            repo.upsertWithStatus('g1', 'i2', 'a', 'C', 'validated');
+            repo.upsertWithStatus('g1', 'i3', 'b', 'C', 'flagged');
+            repo.upsertPending('g1', 'i4', 'b', 'C');
+            expect(repo.statusTotals('g1')).toEqual({ pending: 1, validated: 2, left_early: 0, flagged: 1 });
+            expect(repo.statusTotals('g-empty')).toEqual({ pending: 0, validated: 0, left_early: 0, flagged: 0 });
+        });
+    });
 });

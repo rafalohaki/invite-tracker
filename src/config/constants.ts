@@ -3,6 +3,8 @@
  * and timing knobs do not require grepping across the source tree.
  */
 
+import type { JoinStatus } from '@/types/db.ts';
+
 /** Semantic embed colors per command. Discord embeds accept a 0xRRGGBB integer. */
 export const EMBED_COLORS = {
     invite: 0x0099ff,
@@ -10,6 +12,17 @@ export const EMBED_COLORS = {
     leaderboard: 0xffd700,
     config: 0x5865f2,
     roleRewards: 0x57f287,
+    whoInvited: 0x0099ff,
+    invited: 0x0099ff,
+    stats: 0xeb459e,
+} as const;
+
+/** One emoji per TrackedJoin status — shared by /invited, /who-invited, /server-stats. */
+export const JOIN_STATUS_EMOJI: Record<JoinStatus, string> = {
+    validated: '✅',
+    pending: '⏳',
+    left_early: '📤',
+    flagged: '🚩',
 } as const;
 
 /**

@@ -51,6 +51,33 @@ en: # Default English strings (MUST be present)
     error_start_command: "An error occurred starting the command."
     error_critical: "An unexpected error occurred while checking stats for {user_tag}: {error_message}."
 
+  ## Who-Invited Command
+  whoinvited:
+    embed_title: "Who invited {username}?"
+    result: "**{username}** was invited by {inviter} (code `{code}`), joined {joined_at}."
+    unknown_inviter: "**{username}** joined this server, but the invite could not be attributed."
+    no_data: "No join record found for **{username}** in this server."
+
+  ## Invited Command
+  invited:
+    embed_title: "Members invited by {username}"
+    no_data: "No tracked joins attributed to **{username}** yet."
+    more_footer: "Showing the latest {shown} attributed joins."
+
+  ## Server Stats Command
+  stats:
+    embed_title: "Invite statistics for {guild_name}"
+    history_line: "📥 Joins recorded `{joins}` · 📤 Leaves `{leaves}` · 🚩 Flagged rejoins `{rejoins}`"
+    top_inviter: "Top inviter: {inviter} with `{count}` invites"
+    footer: "Validated + bonus invites count toward the leaderboard and role rewards."
+
+  ## TrackedJoin status labels
+  status:
+    validated: "Validated"
+    pending: "Pending"
+    left_early: "Left early"
+    flagged: "Flagged"
+
   ## General Bot Strings
   general: # <-- CORRECT PARENT SECTION
     error_guild_only: "This command can only be used within a server channel."
@@ -110,6 +137,33 @@ custom: # Add your custom language translations here
     error_admin_id_not_set: "Komenda niedostępna: ID Administratora nie jest skonfigurowane."
     error_start_command: "Wystąpił błąd podczas uruchamiania komendy."
     error_critical: "Wystąpił nieoczekiwany błąd podczas sprawdzania statystyk dla {user_tag}: {error_message}."
+
+  ## Who-Invited Command
+  whoinvited:
+    embed_title: "Kto zaprosił {username}?"
+    result: "**{username}** został(a) zaproszony(-a) przez {inviter} (kod `{code}`), dołączył(a) {joined_at}."
+    unknown_inviter: "**{username}** dołączył(a) na serwer, ale nie udało się przypisać zaproszenia."
+    no_data: "Brak zapisu dołączenia dla **{username}** na tym serwerze."
+
+  ## Invited Command
+  invited:
+    embed_title: "Osoby zaproszone przez {username}"
+    no_data: "Brak dołączeń przypisanych do **{username}**."
+    more_footer: "Pokazano {shown} najnowszych przypisanych dołączeń."
+
+  ## Server Stats Command
+  stats:
+    embed_title: "Statystyki zaproszeń dla {guild_name}"
+    history_line: "📥 Dołączenia `{joins}` · 📤 Wyjścia `{leaves}` · 🚩 Oflagowane powroty `{rejoins}`"
+    top_inviter: "Najlepszy zapraszający: {inviter} z `{count}` zaproszeniami"
+    footer: "Prawidłowe + bonusowe zaproszenia liczą się do rankingu i nagród za role."
+
+  ## TrackedJoin status labels
+  status:
+    validated: "Prawidłowe"
+    pending: "Oczekujące"
+    left_early: "Opuścił(a) wcześnie"
+    flagged: "Oflagowane"
 
   ## General Bot Strings
   general:
