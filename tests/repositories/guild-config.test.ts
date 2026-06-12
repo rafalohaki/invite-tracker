@@ -17,6 +17,8 @@ describe('GuildConfigRepository', () => {
         expect(cfg.locale).toBe(env.LOCALE_LANG);
         expect(cfg.welcome_channel_id).toBeNull();
         expect(cfg.welcome_template).toBeNull();
+        expect(cfg.min_account_age_days).toBe(env.MIN_ACCOUNT_AGE_DAYS);
+        expect(cfg.log_channel_id).toBeNull();
     });
 
     it('set + getOrDefault overrides env defaults', () => {
@@ -25,12 +27,16 @@ describe('GuildConfigRepository', () => {
         repo.set('g1', 'welcome_template', 'Welcome {user}!');
         repo.set('g1', 'locale', 'custom');
         repo.set('g1', 'anti_cheat_window_days', 60);
+        repo.set('g1', 'min_account_age_days', 14);
+        repo.set('g1', 'log_channel_id', '9876543210');
         const cfg = repo.getOrDefault('g1');
         expect(cfg.validation_period_days).toBe(14);
         expect(cfg.welcome_channel_id).toBe('1234567890');
         expect(cfg.welcome_template).toBe('Welcome {user}!');
         expect(cfg.locale).toBe('custom');
         expect(cfg.anti_cheat_window_days).toBe(60);
+        expect(cfg.min_account_age_days).toBe(14);
+        expect(cfg.log_channel_id).toBe('9876543210');
     });
 
     it('reset restores env default for a single key', () => {

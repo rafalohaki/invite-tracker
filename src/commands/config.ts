@@ -25,6 +25,8 @@ const ConfigValueSchema = {
     welcome_template: z.string().min(1).max(1000),
     locale: z.enum(['en', 'custom']),
     anti_cheat_window_days: z.coerce.number().int().min(1).max(365),
+    min_account_age_days: z.coerce.number().int().min(0).max(365),
+    log_channel_id: z.string().regex(SNOWFLAKE, 'must be a valid Discord channel ID (17–20 digits)'),
 } satisfies Record<ConfigKey, z.ZodTypeAny>;
 
 function isConfigKey(input: string): input is ConfigKey {
@@ -91,9 +93,19 @@ export function buildConfigCommand(ctx: AppContext): Command {
                         .addTextDisplayComponents((td) =>
                             td.setContent(`**anti_cheat_window_days** \`${cfg.anti_cheat_window_days}\``),
                         )
+                        .addTextDisplayComponents((td) =>
+                            td.setContent(
+                                `**min_account_age_days** \`${cfg.min_account_age_days}\`${cfg.min_account_age_days === 0 ? ' _(fake detection off)_' : ''}`,
+                            ),
+                        )
                         .addTextDisplayComponents((td) => td.setContent(`**locale** \`${cfg.locale}\``))
                         .addTextDisplayComponents((td) => td.setContent(`**welcome_channel_id** ${welcomeChannel}`))
                         .addTextDisplayComponents((td) => td.setContent(`**welcome_template** ${welcomeTemplate}`))
+                        .addTextDisplayComponents((td) =>
+                            td.setContent(
+                                `**log_channel_id** ${cfg.log_channel_id ? `<#${cfg.log_channel_id}>` : '_(unset)_'}`,
+                            ),
+                        )
                         .addSeparatorComponents((s) => s.setSpacing(SeparatorSpacingSize.Small))
                         .addTextDisplayComponents((td) =>
                             td.setContent('-# Values reflect env defaults when the DB row is NULL.'),

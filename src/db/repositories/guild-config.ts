@@ -8,6 +8,8 @@ export const CONFIG_KEYS = [
     'welcome_template',
     'locale',
     'anti_cheat_window_days',
+    'min_account_age_days',
+    'log_channel_id',
 ] as const;
 export type ConfigKey = (typeof CONFIG_KEYS)[number];
 
@@ -17,6 +19,8 @@ export interface ResolvedGuildConfig {
     welcome_template: string | null;
     locale: Locale;
     anti_cheat_window_days: number;
+    min_account_age_days: number;
+    log_channel_id: string | null;
 }
 
 type ConfigValue = string | number | null;
@@ -29,6 +33,8 @@ export class GuildConfigRepository {
     private readonly stmtSetWelcomeTemplate;
     private readonly stmtSetLocale;
     private readonly stmtSetAntiCheatWindow;
+    private readonly stmtSetMinAccountAge;
+    private readonly stmtSetLogChannel;
     private readonly stmtDeleteForGuild;
 
     constructor(db: Database) {
@@ -48,6 +54,12 @@ export class GuildConfigRepository {
         );
         this.stmtSetAntiCheatWindow = db.prepare<unknown, [number | null, string]>(
             "UPDATE GuildConfig SET anti_cheat_window_days = ?, updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE guildId = ?",
+        );
+        this.stmtSetMinAccountAge = db.prepare<unknown, [number | null, string]>(
+            "UPDATE GuildConfig SET min_account_age_days = ?, updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE guildId = ?",
+        );
+        this.stmtSetLogChannel = db.prepare<unknown, [string | null, string]>(
+            "UPDATE GuildConfig SET log_channel_id = ?, updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE guildId = ?",
         );
         this.stmtDeleteForGuild = db.prepare<unknown, [string]>('DELETE FROM GuildConfig WHERE guildId = ?');
     }
@@ -70,6 +82,8 @@ export class GuildConfigRepository {
             welcome_template: row?.welcome_template ?? null,
             locale: row?.locale ?? env.LOCALE_LANG,
             anti_cheat_window_days: row?.anti_cheat_window_days ?? env.ANTI_CHEAT_WINDOW_DAYS,
+            min_account_age_days: row?.min_account_age_days ?? env.MIN_ACCOUNT_AGE_DAYS,
+            log_channel_id: row?.log_channel_id ?? null,
         };
     }
 
@@ -105,6 +119,12 @@ export class GuildConfigRepository {
                 return;
             case 'anti_cheat_window_days':
                 this.stmtSetAntiCheatWindow.run(value as number | null, guildId);
+                return;
+            case 'min_account_age_days':
+                this.stmtSetMinAccountAge.run(value as number | null, guildId);
+                return;
+            case 'log_channel_id':
+                this.stmtSetLogChannel.run(value as string | null, guildId);
                 return;
         }
     }

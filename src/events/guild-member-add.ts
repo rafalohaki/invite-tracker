@@ -1,6 +1,7 @@
 import { Events } from 'discord.js';
 import { INVITE_FETCH_DELAY_MS } from '@/config/constants.ts';
 import { detectRejoin } from '@/services/anti-cheat.ts';
+import { isAccountTooYoung } from '@/services/anti-fake.ts';
 import { findUsedInviteAndStale } from '@/services/invite-attribution.ts';
 import { cacheGuildInvites, ensureCachedUses, fetchInvitesSafe } from '@/services/invite-cache.ts';
 import { sendWelcomeMessage } from '@/services/welcome.ts';
@@ -76,12 +77,24 @@ export function registerGuildMemberAdd(client: AppClient, ctx: AppContext): void
                 attribution?.inviteCode ?? null,
             );
 
-            // 6. If we attributed, run anti-cheat; flagged rejoins skip TrackedJoin/welcome.
+            // 6. If we attributed, run anti-fake + anti-cheat; flagged joins skip TrackedJoin/welcome.
             if (attribution) {
                 const cfg = ctx.repos.guildConfig.getOrDefault(guild.id);
+                const tooYoung = isAccountTooYoung(user.createdTimestamp, cfg.min_account_age_days);
                 const verdict = detectRejoin(ctx, guild.id, user.id, attribution.inviterId, cfg.anti_cheat_window_days);
 
-                if (verdict.isSuspicious) {
+                if (tooYoung) {
+                    logWarn(
+                        `${prefix} Anti-fake flag: account created ${user.createdAt?.toISOString() ?? '?'} is younger than ${cfg.min_account_age_days}d — no invite credit.`,
+                    );
+                    ctx.repos.trackedJoins.upsertWithStatus(
+                        guild.id,
+                        user.id,
+                        attribution.inviterId,
+                        attribution.inviteCode,
+                        'flagged',
+                    );
+                } else if (verdict.isSuspicious) {
                     logWarn(
                         `${prefix} Anti-cheat flag: ${user.id} previously invited by ${verdict.previousInviterId}, now by ${attribution.inviterId} within ${cfg.anti_cheat_window_days}d.`,
                     );

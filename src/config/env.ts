@@ -33,6 +33,9 @@ const envSchema = z.object({
 
     ANTI_CHEAT_WINDOW_DAYS: z.coerce.number().int().min(0).max(365).default(30),
 
+    /** Joins from accounts younger than this many days are flagged as fake. 0 = disabled. */
+    MIN_ACCOUNT_AGE_DAYS: z.coerce.number().int().min(0).max(365).default(0),
+
     PERFORM_GUILD_DELETE_CLEANUP: boolSchema,
 });
 
