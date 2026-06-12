@@ -1,4 +1,5 @@
 import { Events } from 'discord.js';
+import { renderLeaveLogLine, sendEventLog } from '@/services/event-log.ts';
 import type { AppClient, AppContext } from '@/types/discord.ts';
 import { ensureFullMemberData } from '@/utils/discord-members.ts';
 import { logError, logInfo, logWarn } from '@/utils/logger.ts';
@@ -24,6 +25,19 @@ export function registerGuildMemberRemove(client: AppClient, ctx: AppContext): v
             logInfo(
                 `${prefix} Updates: TrackedJoins(pending→left_early)=${trackedChanges}, JoinHistory.markLeft=${historyChanges}.`,
             );
+
+            // Leave log (no-op unless log_channel_id is configured). Needs a full Guild
+            // object for the channel fetch — the partial's `guild` is always present.
+            const guild = member?.guild ?? rawMember.guild;
+            if (guild) {
+                try {
+                    const inviterId = ctx.repos.trackedJoins.getByInvitee(guildId, userId)?.inviterId ?? null;
+                    const locale = ctx.repos.guildConfig.getLocale(guildId);
+                    await sendEventLog(ctx, guild, renderLeaveLogLine(userId, inviterId, locale));
+                } catch (err) {
+                    logError(`${prefix} Leave log dispatch failed:`, err);
+                }
+            }
         } catch (err) {
             logError(`${base} Uncaught error in handler:`, err);
         }

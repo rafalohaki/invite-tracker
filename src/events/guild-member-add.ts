@@ -2,6 +2,7 @@ import { Events } from 'discord.js';
 import { INVITE_FETCH_DELAY_MS } from '@/config/constants.ts';
 import { detectRejoin } from '@/services/anti-cheat.ts';
 import { isAccountTooYoung } from '@/services/anti-fake.ts';
+import { type JoinLogDetails, type JoinLogKind, renderJoinLogLine, sendEventLog } from '@/services/event-log.ts';
 import { findUsedInviteAndStale } from '@/services/invite-attribution.ts';
 import { cacheGuildInvites, ensureCachedUses, fetchInvitesSafe } from '@/services/invite-cache.ts';
 import { sendWelcomeMessage } from '@/services/welcome.ts';
@@ -23,9 +24,20 @@ export function registerGuildMemberAdd(client: AppClient, ctx: AppContext): void
             const prefix = `[GuildMemberAdd][Guild:${guild.id}][User:${user.id}]`;
             logInfo(`${prefix} User ${user.username} joined.`);
 
+            // Best-effort join-log dispatch (no-op unless log_channel_id is configured).
+            const postJoinLog = async (kind: JoinLogKind, details: Omit<JoinLogDetails, 'userId'> = {}) => {
+                try {
+                    const locale = ctx.repos.guildConfig.getLocale(guild.id);
+                    await sendEventLog(ctx, guild, renderJoinLogLine(kind, { userId: user.id, ...details }, locale));
+                } catch (err) {
+                    logError(`${prefix} Join log dispatch failed:`, err);
+                }
+            };
+
             if (!hasManageGuild(guild)) {
                 logWarn(`${prefix} Bot lacks Manage Guild — recording join without attribution.`);
                 ctx.repos.joinHistory.record(guild.id, user.id, null, null);
+                await postJoinLog('unattributed');
                 return;
             }
 
@@ -48,6 +60,7 @@ export function registerGuildMemberAdd(client: AppClient, ctx: AppContext): void
             if (trackedInvites.length === 0) {
                 logInfo(`${prefix} No bot-tracked invites — recording without attribution.`);
                 ctx.repos.joinHistory.record(guild.id, user.id, null, null);
+                await postJoinLog('unattributed');
                 await cacheGuildInvites(guild);
                 return;
             }
@@ -94,6 +107,7 @@ export function registerGuildMemberAdd(client: AppClient, ctx: AppContext): void
                         attribution.inviteCode,
                         'flagged',
                     );
+                    await postJoinLog('flagged_fake', { inviterId: attribution.inviterId });
                 } else if (verdict.isSuspicious) {
                     logWarn(
                         `${prefix} Anti-cheat flag: ${user.id} previously invited by ${verdict.previousInviterId}, now by ${attribution.inviterId} within ${cfg.anti_cheat_window_days}d.`,
@@ -106,6 +120,7 @@ export function registerGuildMemberAdd(client: AppClient, ctx: AppContext): void
                         'flagged',
                     );
                     ctx.repos.joinHistory.flagAsRejoin(joinHistoryId);
+                    await postJoinLog('flagged_rejoin', { inviterId: attribution.inviterId });
                 } else {
                     ctx.repos.trackedJoins.upsertPending(
                         guild.id,
@@ -117,24 +132,34 @@ export function registerGuildMemberAdd(client: AppClient, ctx: AppContext): void
                         `${prefix} Recorded pending TrackedJoin (inviter ${attribution.inviterId}, code ${attribution.inviteCode}).`,
                     );
 
+                    // Inviter's total credit (validated + bonus) — used by welcome {count} and the join log.
+                    const validatedCount = ctx.repos.trackedJoins.countByStatus(
+                        guild.id,
+                        attribution.inviterId,
+                        'validated',
+                    );
+                    const bonusCount = ctx.repos.bonusInvites.get(guild.id, attribution.inviterId);
+                    const inviterTotal = validatedCount + bonusCount;
+
+                    await postJoinLog('attributed', {
+                        inviterId: attribution.inviterId,
+                        inviteCode: attribution.inviteCode,
+                        inviterTotal,
+                    });
+
                     // Send welcome message (best effort — fetch inviter as a User, not a member of THIS guild,
                     // so we still mention them even if they since left).
                     try {
                         const inviterUser = await client.users.fetch(attribution.inviterId).catch(() => null);
                         if (inviterUser) {
-                            // {count} in the template = inviter's total credit (validated + bonus).
-                            const validatedCount = ctx.repos.trackedJoins.countByStatus(
-                                guild.id,
-                                attribution.inviterId,
-                                'validated',
-                            );
-                            const bonusCount = ctx.repos.bonusInvites.get(guild.id, attribution.inviterId);
-                            await sendWelcomeMessage(ctx, guild, member, inviterUser, validatedCount + bonusCount);
+                            await sendWelcomeMessage(ctx, guild, member, inviterUser, inviterTotal);
                         }
                     } catch (err) {
                         logError(`${prefix} Welcome message dispatch failed:`, err);
                     }
                 }
+            } else {
+                await postJoinLog('unattributed');
             }
 
             // 7. Refresh cache so the next join sees the new counts.

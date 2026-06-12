@@ -78,6 +78,15 @@ en: # Default English strings (MUST be present)
     left_early: "Left early"
     flagged: "Flagged"
 
+  ## Join/Leave log channel lines
+  log:
+    join_attributed: "📥 {user} joined — invited by {inviter} (code `{code}`). Inviter total: `{count}`."
+    join_unattributed: "📥 {user} joined — invite could not be attributed."
+    join_flagged_fake: "🚩 {user} joined — account younger than the minimum age (invited by {inviter}, no credit)."
+    join_flagged_rejoin: "🚩 {user} rejoined via a different inviter ({inviter}) — flagged, no credit."
+    leave_attributed: "📤 {user} left — was invited by {inviter}."
+    leave_unattributed: "📤 {user} left."
+
   ## General Bot Strings
   general: # <-- CORRECT PARENT SECTION
     error_guild_only: "This command can only be used within a server channel."
@@ -164,6 +173,15 @@ custom: # Add your custom language translations here
     pending: "Oczekujące"
     left_early: "Opuścił(a) wcześnie"
     flagged: "Oflagowane"
+
+  ## Join/Leave log channel lines
+  log:
+    join_attributed: "📥 {user} dołączył(a) — zaproszenie od {inviter} (kod `{code}`). Łącznie zapraszającego: `{count}`."
+    join_unattributed: "📥 {user} dołączył(a) — nie udało się przypisać zaproszenia."
+    join_flagged_fake: "🚩 {user} dołączył(a) — konto młodsze niż wymagane minimum (zaproszenie od {inviter}, bez zaliczenia)."
+    join_flagged_rejoin: "🚩 {user} wrócił(a) przez innego zapraszającego ({inviter}) — oflagowane, bez zaliczenia."
+    leave_attributed: "📤 {user} wyszedł/wyszła — zaproszenie od {inviter}."
+    leave_unattributed: "📤 {user} wyszedł/wyszła."
 
   ## General Bot Strings
   general:
