@@ -109,12 +109,14 @@ export function registerGuildMemberAdd(client: AppClient, ctx: AppContext): void
                     try {
                         const inviterUser = await client.users.fetch(attribution.inviterId).catch(() => null);
                         if (inviterUser) {
+                            // {count} in the template = inviter's total credit (validated + bonus).
                             const validatedCount = ctx.repos.trackedJoins.countByStatus(
                                 guild.id,
                                 attribution.inviterId,
                                 'validated',
                             );
-                            await sendWelcomeMessage(ctx, guild, member, inviterUser, validatedCount);
+                            const bonusCount = ctx.repos.bonusInvites.get(guild.id, attribution.inviterId);
+                            await sendWelcomeMessage(ctx, guild, member, inviterUser, validatedCount + bonusCount);
                         }
                     } catch (err) {
                         logError(`${prefix} Welcome message dispatch failed:`, err);

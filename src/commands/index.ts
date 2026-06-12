@@ -1,4 +1,5 @@
 import type { AppContext, Command } from '@/types/discord.ts';
+import { buildBonusCommand } from './bonus.ts';
 import { buildCheckCommand } from './check.ts';
 import { buildConfigCommand } from './config.ts';
 import { buildInviteCommand } from './invite.ts';
@@ -12,5 +13,6 @@ export function buildCommands(ctx: AppContext): Command[] {
         buildCheckCommand(ctx),
         buildConfigCommand(ctx),
         buildRoleRewardsCommand(ctx),
+        buildBonusCommand(ctx),
     ];
 }

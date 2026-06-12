@@ -31,6 +31,16 @@ export interface GuildConfigRow {
     welcome_template: string | null;
     locale: Locale | null;
     anti_cheat_window_days: number | null;
+    min_account_age_days: number | null;
+    log_channel_id: string | null;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface BonusInviteRow {
+    guildId: string;
+    userId: string;
+    amount: number;
     createdAt: string;
     updatedAt: string;
 }

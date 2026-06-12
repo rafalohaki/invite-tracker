@@ -62,6 +62,7 @@ export function buildCheckCommand(ctx: AppContext): Command {
                 const inviteCode = userInvite?.inviteCode ?? null;
                 const validated = ctx.repos.trackedJoins.countByStatus(guild.id, targetId, 'validated');
                 const pending = ctx.repos.trackedJoins.countByStatus(guild.id, targetId, 'pending');
+                const bonus = ctx.repos.bonusInvites.get(guild.id, targetId);
                 const flagged = ctx.repos.joinHistory.getFlaggedForUser(guild.id, targetId);
 
                 const inviteLine = inviteCode
@@ -88,7 +89,7 @@ export function buildCheckCommand(ctx: AppContext): Command {
                     .addTextDisplayComponents((td) => td.setContent(inviteLine))
                     .addTextDisplayComponents((td) =>
                         td.setContent(
-                            `✅ **${t('check.validated_field_name', {}, guildLocale)}** \`${validated}\` · ⏳ **${t('check.pending_field_name', {}, guildLocale)}** \`${pending}\``,
+                            `✅ **${t('check.validated_field_name', {}, guildLocale)}** \`${validated}\` · ⏳ **${t('check.pending_field_name', {}, guildLocale)}** \`${pending}\` · 🎁 **${t('check.bonus_field_name', {}, guildLocale)}** \`${bonus}\` · Σ **${t('check.total_field_name', {}, guildLocale)}** \`${validated + bonus}\``,
                         ),
                     );
 

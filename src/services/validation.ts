@@ -83,8 +83,9 @@ export async function runValidation(client: AppClient, ctx: AppContext): Promise
             try {
                 const inviter = await guild.members.fetch(inviterId).catch(() => null);
                 if (!inviter) continue;
-                const count = ctx.repos.trackedJoins.countByStatus(guildId, inviterId, 'validated');
-                await assignEligibleRoles(ctx, guild, inviter, count);
+                const validated = ctx.repos.trackedJoins.countByStatus(guildId, inviterId, 'validated');
+                const bonus = ctx.repos.bonusInvites.get(guildId, inviterId);
+                await assignEligibleRoles(ctx, guild, inviter, validated + bonus);
             } catch (err) {
                 logError(`[ValidationTask][Guild:${guildId}][Inviter:${inviterId}] Role assignment failed:`, err);
             }

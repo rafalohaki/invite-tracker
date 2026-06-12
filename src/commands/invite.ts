@@ -166,6 +166,7 @@ export function buildInviteCommand(ctx: AppContext): Command {
                 // 2. Aggregate counts.
                 const validated = ctx.repos.trackedJoins.countByStatus(guild.id, user.id, 'validated');
                 const pending = ctx.repos.trackedJoins.countByStatus(guild.id, user.id, 'pending');
+                const bonus = ctx.repos.bonusInvites.get(guild.id, user.id);
 
                 // 3. Build Components v2 container.
                 const container = new ContainerBuilder()
@@ -184,7 +185,7 @@ export function buildInviteCommand(ctx: AppContext): Command {
                     )
                     .addTextDisplayComponents((td) =>
                         td.setContent(
-                            `✅ **${t('invite.validated_field_name', {}, guildLocale)}** \`${validated}\` · ⏳ **${t('invite.pending_field_name', {}, guildLocale)}** \`${pending}\``,
+                            `✅ **${t('invite.validated_field_name', {}, guildLocale)}** \`${validated}\` · ⏳ **${t('invite.pending_field_name', {}, guildLocale)}** \`${pending}\` · 🎁 **${t('invite.bonus_field_name', {}, guildLocale)}** \`${bonus}\` · Σ **${t('invite.total_field_name', {}, guildLocale)}** \`${validated + bonus}\``,
                         ),
                     )
                     .addSeparatorComponents((s) => s.setSpacing(SeparatorSpacingSize.Small))

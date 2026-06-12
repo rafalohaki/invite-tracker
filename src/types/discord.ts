@@ -7,6 +7,7 @@ import type {
     Collection,
     SharedSlashCommand,
 } from 'discord.js';
+import type { BonusInvitesRepository } from '@/db/repositories/bonus-invites.ts';
 import type { GuildConfigRepository } from '@/db/repositories/guild-config.ts';
 import type { JoinHistoryRepository } from '@/db/repositories/join-history.ts';
 import type { RoleRewardsRepository } from '@/db/repositories/role-rewards.ts';
@@ -19,6 +20,7 @@ export interface Repositories {
     guildConfig: GuildConfigRepository;
     roleRewards: RoleRewardsRepository;
     joinHistory: JoinHistoryRepository;
+    bonusInvites: BonusInvitesRepository;
 }
 
 /** Container passed to every command/event handler — pure DI, no module-level state. */

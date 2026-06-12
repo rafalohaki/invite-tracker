@@ -1,5 +1,6 @@
 import type { Database } from 'bun:sqlite';
 import type { Repositories } from '@/types/discord.ts';
+import { BonusInvitesRepository } from './bonus-invites.ts';
 import { GuildConfigRepository } from './guild-config.ts';
 import { JoinHistoryRepository } from './join-history.ts';
 import { RoleRewardsRepository } from './role-rewards.ts';
@@ -19,5 +20,6 @@ export function createRepositories(db: Database): Repositories {
         guildConfig: new GuildConfigRepository(db),
         roleRewards: new RoleRewardsRepository(db),
         joinHistory: new JoinHistoryRepository(db),
+        bonusInvites: new BonusInvitesRepository(db),
     };
 }

@@ -65,11 +65,22 @@ export class TrackedJoinsRepository {
         this.stmtCountByStatus = db.query<{ count: number }, [string, string, JoinStatus]>(
             'SELECT COUNT(*) as count FROM TrackedJoins WHERE guildId = ? AND inviterId = ? AND status = ?',
         );
-        this.stmtLeaderboardAll = db.query<LeaderboardEntryRow, [string, number]>(
-            `SELECT inviterId, COUNT(*) as count
-             FROM TrackedJoins
-             WHERE guildId = ? AND status = 'validated'
-             GROUP BY inviterId
+        // 'all' leaderboards merge validated joins with admin-granted bonus invites
+        // (UNION ALL + outer SUM). Users whose net total is <= 0 are hidden.
+        // Time-windowed leaderboards stay validated-only: bonus has no timestamp semantics.
+        this.stmtLeaderboardAll = db.query<LeaderboardEntryRow, [string, string, number]>(
+            `SELECT userId as inviterId, SUM(cnt) as count FROM (
+                 SELECT inviterId as userId, COUNT(*) as cnt
+                 FROM TrackedJoins
+                 WHERE guildId = ? AND status = 'validated'
+                 GROUP BY inviterId
+                 UNION ALL
+                 SELECT userId, amount as cnt
+                 FROM BonusInvites
+                 WHERE guildId = ? AND amount <> 0
+             )
+             GROUP BY userId
+             HAVING SUM(cnt) > 0
              ORDER BY count DESC, inviterId ASC
              LIMIT ?`,
         );
@@ -81,11 +92,19 @@ export class TrackedJoinsRepository {
              ORDER BY count DESC, inviterId ASC
              LIMIT ?`,
         );
-        this.stmtLeaderboardAllPage = db.query<LeaderboardEntryRow, [string, number, number]>(
-            `SELECT inviterId, COUNT(*) as count
-             FROM TrackedJoins
-             WHERE guildId = ? AND status = 'validated'
-             GROUP BY inviterId
+        this.stmtLeaderboardAllPage = db.query<LeaderboardEntryRow, [string, string, number, number]>(
+            `SELECT userId as inviterId, SUM(cnt) as count FROM (
+                 SELECT inviterId as userId, COUNT(*) as cnt
+                 FROM TrackedJoins
+                 WHERE guildId = ? AND status = 'validated'
+                 GROUP BY inviterId
+                 UNION ALL
+                 SELECT userId, amount as cnt
+                 FROM BonusInvites
+                 WHERE guildId = ? AND amount <> 0
+             )
+             GROUP BY userId
+             HAVING SUM(cnt) > 0
              ORDER BY count DESC, inviterId ASC
              LIMIT ? OFFSET ?`,
         );
@@ -150,11 +169,12 @@ export class TrackedJoinsRepository {
 
     /**
      * Top-N inviters in a guild, restricted to a time window.
-     * `all` ignores joinTimestamp; `week`/`month` use a rolling window from now().
+     * `all` ignores joinTimestamp and includes bonus invites; `week`/`month` use a
+     * rolling window from now() and count validated joins only.
      */
     getLeaderboard(guildId: string, limit: number, period: LeaderboardPeriod): LeaderboardEntryRow[] {
         if (period === 'all') {
-            return this.stmtLeaderboardAll.all(guildId, limit);
+            return this.stmtLeaderboardAll.all(guildId, guildId, limit);
         }
         const days = PERIOD_TO_DAYS[period];
         const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
@@ -169,7 +189,7 @@ export class TrackedJoinsRepository {
         period: LeaderboardPeriod,
     ): LeaderboardEntryRow[] {
         if (period === 'all') {
-            return this.stmtLeaderboardAllPage.all(guildId, limit, offset);
+            return this.stmtLeaderboardAllPage.all(guildId, guildId, limit, offset);
         }
         const days = PERIOD_TO_DAYS[period];
         const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
