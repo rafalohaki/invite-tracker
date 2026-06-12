@@ -27,7 +27,7 @@ const ConfigValueSchema = {
     anti_cheat_window_days: z.coerce.number().int().min(1).max(365),
     min_account_age_days: z.coerce.number().int().min(0).max(365),
     log_channel_id: z.string().regex(SNOWFLAKE, 'must be a valid Discord channel ID (17–20 digits)'),
-} satisfies Record<ConfigKey, z.ZodTypeAny>;
+} satisfies Record<ConfigKey, z.ZodType>;
 
 function isConfigKey(input: string): input is ConfigKey {
     return (CONFIG_KEYS as readonly string[]).includes(input);

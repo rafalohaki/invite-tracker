@@ -2,91 +2,58 @@
 trigger: always_on
 ---
 
-# Project: invite-tracker
+# Project: invite-tracker (v2 — TypeScript rewrite)
 
 ## Stack
-- Node.js 24 LTS (via nvm, .nvmrc pinned to 24)
-- discord.js ^14.25.1 (zainstalowana przez bun — latest stable v14)
-- SQLite (natywny sterownik bun:sqlite — brak zewnętrznych zależności DB)
-- dotenv ^16.5.0
-- js-yaml ^4.1.0 (custom-lang.yaml translations)
-- Package manager: bun (bun install, bun run)
-- Deploy target: self-hosted / VPS
-
-## MCP dla tego projektu
-- discord.js API → web_search_exa "discord.js v14 [topic] site:discord.js.org" then crawling_exa
-- SQLite / bun:sqlite → web_search_exa then crawling_exa https://bun.sh/docs/api/sqlite
-- Node.js core → no MCP needed
-- Docs: https://discord.js.org/docs/packages/discord.js/14.25.1
-- Bun SQLite docs: https://bun.sh/docs/api/sqlite
+- Bun ≥ 1.3 — runs `.ts` natively, no build step (runtime AND package manager; never npm/npx/node)
+- TypeScript strict (tsc --noEmit only, TS 6.x), path alias `@/*` → `src/*`
+- discord.js v14 (latest stable, Components v2 UI: ContainerBuilder + MessageFlags.IsComponentsV2)
+- bun:sqlite (native driver, WAL mode) — no external DB dependencies
+- zod v4 (env + config validation), js-yaml (i18n), Biome v2 (lint + format)
+- Deploy target: self-hosted / VPS via Docker (`deploy/`)
 
 ## Commands
-# Install dependencies
-bun install
+- `bun install`
+- `bun run start` / `bun run dev`        # bot (dev = --watch)
+- `bun run deploy:commands`              # register slash commands with Discord
+- `bun run verify`                       # lint + typecheck + test — run before every commit
+- `bun run lint:fix`                     # Biome auto-fix
 
-# Run bot (production)
-bun run start         # → bun index.js
-
-# Run bot (dev, auto-restart on change)
-bun run dev           # → bun --watch index.js
-
-# Deploy slash commands to Discord
-bun run deploy        # → bun deploy-commands.js
-
-## Struktura projektu
-index.js                     # główny plik bota — klient, eventy, caching zaproszeń
-config.js                    # non-sensitive runtime config (kolory, limity)
-deploy-commands.js           # jednorazowy skrypt rejestracji slash commands
-commands/
-  invite.js                  # /invite — generuje/pokazuje link i statystyki
-  leaderboard.js             # /leaderboard — ranking inviters
-  check.js                   # /check [admin only] — sprawdza statystyki usera
-database/
-  db.js                      # SQLite interface (bun:sqlite) — tabele UserInvites + TrackedJoins
-utils/
-  logger.js                  # wspólny logger (logDebug/Info/Warn/Error)
-  translator.js              # t() — odczytuje klucze z custom-lang.yaml
-custom-lang.yaml             # tłumaczenia (sekcje: en:, custom:)
-invites.db                   # plik bazy SQLite (auto-tworzony przy starcie bota)
+## Architektura (src/)
+- `index.ts` — bootstrap: env → DB migrate → client → events → login; graceful shutdown
+- `config/{env,constants}.ts` — zod-validated env (fail-fast), bot-wide constants
+- `db/client.ts` — createDb(path) factory (nie singleton; testy używają `:memory:`)
+- `db/migrations/*.sql` — forward-only, idempotentne (tabela `_migrations`)
+- `db/repositories/` — jedno repo na tabelę + `createRepositories(db)` factory;
+  WSZYSTKIE zapytania SQL wyłącznie w repozytoriach (prepared statements)
+- `services/` — logika biznesowa, czyste funkcje gdzie się da (testowalne bez Discorda)
+- `commands/` — fabryki `build*Command(ctx)` zwracające `{ data, execute, autocomplete? }`
+- `events/` — `register*(client, ctx)` per zdarzenie
+- `i18n/custom-lang.yaml` — sekcje `en:` (wymagana) i `custom:` (PL); dostęp przez `t()`
+- `types/` — typy wierszy DB + `AppContext` (DI: `{ db, repos }`)
 
 ## Zasady kodu
-- CommonJS only (require/module.exports) — NO ESM import/export
-- "type": "commonjs" ustawione w package.json
-- Database: używaj WYŁĄCZNIE database/db.js (dbInterface). Nie importuj bun:sqlite bezpośrednio
-  poza tym plikiem. bun:sqlite jest synchroniczne — nie dodawaj zbędnych await przy operacjach DB.
-- Mongoose zostało USUNIĘTE — nigdy nie importuj go ponownie
-- All secrets via .env (DISCORD_TOKEN, CLIENT_ID, ADMIN_IDS) — NEVER w config.js
-- SQLite nie wymaga MONGODB_URI w .env
-- config.js = non-sensitive runtime config only (embedColor, limits, intervals)
-- Use discord.js v14 API only: GatewayIntentBits, Events, PermissionsBitField, Collection
-- NEVER use deprecated v13 patterns: no MessageEmbed (use EmbedBuilder), no Intents.FLAGS
-- NEVER use deprecated user.tag — używaj user.username lub member.displayName
-- Slash command files MUST export { data: SlashCommandBuilder, execute: async fn }
-- Locale/translations: zawsze przez utils/translator.js t() — nigdy hardcode strings
-- Logging: ZAWSZE importuj { logDebug, logInfo, logWarn, logError } from utils/logger.js
-  — ZERO bezpośrednich console.log/warn/error/debug w żadnym pliku projektu
-- Async error handling: wrap all event handlers w try/catch, reply ephemeral on error
-- Intents: GuildMembers jest PRIVILEGED — musi być włączony w Discord Dev Portal
-- Channel type check: przy tworzeniu invite akceptuj GuildText, GuildAnnouncement,
-  GuildVoice, GuildStageVoice — dla threadów/forów używaj kanału nadrzędnego (isThread())
-- setInterval timery: zawsze zapisuj referencję (let x = setInterval(...))
-  i czyść clearInterval(x) w shutdown handler
+- ESM only (`"type": "module"`), importy z rozszerzeniem `.ts` i aliasem `@/`
+- Dependency injection przez `AppContext` — zero stanu modułowego poza invite-cache
+- bun:sqlite jest synchroniczne — nie dodawaj zbędnych `await` przy operacjach DB
+- Wszystkie sekrety przez `.env` (walidacja w `config/env.ts`); nigdy w kodzie
+- UI: Components v2 (ContainerBuilder); NIE używaj EmbedBuilder w nowym kodzie
+- NIGDY wzorce v13 (MessageEmbed, Intents.FLAGS) ani deprecated `user.tag`
+- Teksty użytkownika ZAWSZE przez `t()` z `custom-lang.yaml` (en + custom/PL)
+- Logging ZAWSZE przez `@/utils/logger.ts` — zero gołych console.*
+- Event handlery owinięte w try/catch; błędy komend → ephemeral reply
+- Timery: trzymaj uchwyt i czyść w shutdown (wzorzec: ValidationScheduler.cancel())
+- Timestampy: ISO 8601 zgodne z `strftime('%Y-%m-%dT%H:%M:%fZ','now')` (porównania leksykograficzne)
+- Nowe tabele: migracja `NNN_*.sql` + typ wiersza w `types/db.ts` + repo + wpis
+  w `createRepositories` + interfejs `Repositories` + testy na `:memory:`
+- Intenty: GuildMembers jest PRIVILEGED (włącz w Dev Portal); GuildInvites wymagany dla cache
 
-## Env variables (.env)
-DISCORD_TOKEN=           # token bota (wymagany)
-CLIENT_ID=               # application ID (wymagany)
-ADMIN_IDS=               # ID adminów po przecinku, bez spacji (wymagany dla /check)
-LOCALE_LANG=             # 'en' lub 'custom' (opcjonalny, domyślnie 'en')
-TEST_GUILD_ID=           # ID serwera testowego dla deploy-commands (opcjonalny)
-VALIDATION_PERIOD_DAYS=  # override domyślnych 7 dni (opcjonalny)
-VALIDATION_CHECK_INTERVAL_MINUTES=  # override domyślnych 60 min (opcjonalny)
-LOG_LEVEL=               # DEBUG | INFO | WARN | ERROR (domyślnie INFO)
-PERFORM_GUILD_DELETE_CLEANUP=  # true/false (domyślnie false)
+## Testy
+- `bun test` — bez I/O Discorda; repozytoria i czyste serwisy na `createTestDb()` (`:memory:`)
+- Test migracji utrzymuje pełną listę plików `NNN_*.sql` — zaktualizuj przy nowej migracji
 
-## WAŻNE – agent behavior
-- NEVER modify files based on analysis alone
-- Analysis = read-only, wait for user confirmation before making changes
-- Before changing discord.js version: verify exact version via crawling_exa on npmjs.com FIRST
-- Before adding new intents: check if PRIVILEGED (GuildMembers, GuildPresences, MessageContent)
-- bun run start/dev BĘDZIE crashować bez .env — to oczekiwane zachowanie
-- Nie używaj npm/npx — projekt używa wyłącznie bun/bunx
+## Agent behavior
+- Przed zmianą wersji discord.js sprawdź najnowszą stabilną (npm view discord.js version)
+- Nowe intenty: sprawdź czy PRIVILEGED (GuildMembers, GuildPresences, MessageContent)
+- `bun run start/dev` crashuje bez `.env` — to oczekiwane (fail-fast)
+- Przed commitem: `bun run verify` musi przejść w całości
