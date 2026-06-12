@@ -12,18 +12,26 @@ A Discord bot that tracks user-generated invites, validates joins after a config
 
 | Command | What it does |
 |---|---|
-| `/invite` | Generates (or returns) your personal permanent invite link, plus your validated / pending counts. |
-| `/leaderboard period:[all\|week\|month]` | Top inviters in this server, paginated 10 per page with Prev / Next buttons. |
+| `/invite` | Generates (or returns) your personal permanent invite link, plus your validated / pending / bonus / total counts. |
+| `/leaderboard period:[all\|week\|month]` | Top inviters in this server, paginated 10 per page with Prev / Next buttons. `all` includes bonus invites. |
+| `/who-invited <user>` | Shows who invited a member (inviter, invite code, relative join time, status). |
+| `/invited [user]` | Lists the latest 20 members someone invited, with per-join status icons (defaults to you). |
+| `/server-stats` | Public server-wide stats: joins per status, lifetime joins/leaves, flagged rejoins, top inviter. |
 | `/check <user>` | _(admin)_ Inspect another user's invite stats, including flagged rejoins. |
+| `/bonus add\|remove <user> <amount> \| show <user>` | _(Manage Guild)_ Grant or revoke bonus invites; counts toward totals and role rewards. |
 | `/config get \| set <key> <value> \| reset <key>` | _(Manage Guild)_ Per-guild configuration with autocomplete on `key`. |
-| `/role-rewards add <threshold> <role> \| remove <threshold> \| list` | _(Manage Guild)_ Grant a role automatically when an inviter reaches N validated invites. |
+| `/role-rewards add <threshold> <role> \| remove <threshold> \| list` | _(Manage Guild)_ Grant a role automatically when an inviter reaches N invites (validated + bonus). |
 
 Behind the scenes:
 
 - **Validated vs pending joins** — a join enters `pending` immediately; if the user is still in the guild after `validation_period_days` (default 7), it flips to `validated`. If they leave first, it flips to `left_early`.
 - **Anti-cheat rejoin detection** — if the same user leaves and rejoins via a *different* inviter inside the `anti_cheat_window_days` window (default 30), the new join is recorded as `flagged` and earns no validated credit. Visible in `/check`.
-- **Role rewards** — checked on every promotion to `validated`. Bulk `member.roles.add(array)` for rate-limit friendliness; hierarchy + permission check before every grant.
-- **i18n** — every user-facing string lives in `src/i18n/custom-lang.yaml`. Global default via `LOCALE_LANG`; per-guild override via `/config set locale custom|en`.
+- **Anti-fake account-age filter** — when `min_account_age_days` is set, joins from Discord accounts younger than the threshold are `flagged` and earn no credit.
+- **Bonus invites** — admins can add/remove credit per user. The `all` leaderboard, `/invite`, `/check`, role rewards and the welcome `{count}` all use validated + bonus.
+- **Join/leave log** — set `log_channel_id` and the bot posts a line for every join (with inviter attribution, fake/rejoin flags) and every leave. Mentions never ping.
+- **Live invite cache** — `InviteCreate`/`InviteDelete` gateway events keep the uses cache fresh and purge deleted bot invites from the DB immediately.
+- **Role rewards** — checked on every promotion to `validated` and on every `/bonus add`. Bulk `member.roles.add(array)` for rate-limit friendliness; hierarchy + permission check before every grant.
+- **i18n** — every user-facing string lives in `src/i18n/custom-lang.yaml` (English + Polish `custom` section). Global default via `LOCALE_LANG`; per-guild override via `/config set locale custom|en`.
 
 ## Requirements
 
@@ -61,6 +69,7 @@ bun run start             # or `bun run dev` for hot-reload
 | `VALIDATION_PERIOD_DAYS` | `7` | How long a user must stay to count as a validated invite. |
 | `VALIDATION_CHECK_INTERVAL_MINUTES` | `60` | Validation task cadence. |
 | `ANTI_CHEAT_WINDOW_DAYS` | `30` | Rejoin window for anti-cheat. Set to `0` to disable. |
+| `MIN_ACCOUNT_AGE_DAYS` | `0` | Joins from accounts younger than this are flagged as fake. `0` disables. |
 | `PERFORM_GUILD_DELETE_CLEANUP` | `false` | If `true`, wipes guild-scoped DB rows when the bot leaves a guild. |
 
 ### Per-guild configuration (`/config`)
@@ -74,6 +83,8 @@ Every guild can override the environment defaults without a redeploy:
 | `welcome_template` | string ≤ 1000 chars | `Welcome {user}! Invited by {inviter} (#{count}).` |
 | `locale` | `en` \| `custom` | `custom` |
 | `anti_cheat_window_days` | integer 1–365 | `60` |
+| `min_account_age_days` | integer 0–365 (`0` = off) | `7` |
+| `log_channel_id` | snowflake | `123456789012345678` |
 
 ```text
 /config set welcome_channel_id 123456789012345678
@@ -104,7 +115,7 @@ docker compose -f deploy/docker-compose.yml run --rm bot bun src/deploy-commands
 
 ```bash
 bun run dev        # bun --watch src/index.ts
-bun run test       # bun test (95 tests, in-memory SQLite, zero Discord I/O)
+bun run test       # bun test (113 tests, in-memory SQLite, zero Discord I/O)
 bun run lint       # Biome v2 (lint + format)
 bun run lint:fix   # auto-fix lint + format
 bun run typecheck  # tsc --noEmit
@@ -125,17 +136,19 @@ src/
 ├── db/
 │   ├── client.ts           # createDb(path) factory; not a singleton (testable)
 │   ├── migration-runner.ts # idempotent SQL migration runner
-│   ├── migrations/*.sql    # 4 forward migrations (no down migrations)
-│   └── repositories/*.ts   # 5 typed repositories, one per table
+│   ├── migrations/*.sql    # 6 forward migrations (no down migrations)
+│   └── repositories/*.ts   # 6 typed repositories + createRepositories(db) factory
 ├── services/               # business logic, zero discord.js coupling where possible
 │   ├── invite-cache.ts
 │   ├── invite-attribution.ts
 │   ├── validation.ts       # periodic scheduler + batched member fetch
 │   ├── welcome.ts          # template render + allowedMentions whitelist
+│   ├── event-log.ts        # join/leave log channel (pure renderers + sender)
 │   ├── role-rewards.ts     # hierarchy check + bulk roles.add
-│   └── anti-cheat.ts       # rejoin detection
-├── commands/               # 5 slash-command builders, factory pattern (ctx-injected)
-├── events/                 # 6 event handlers (ready / interaction / guild × 2 / member × 2)
+│   ├── anti-cheat.ts       # rejoin detection
+│   └── anti-fake.ts        # account-age fake detection
+├── commands/               # 9 slash-command builders, factory pattern (ctx-injected)
+├── events/                 # 7 event handlers (ready / interaction / guild × 2 / member × 2 / invites)
 ├── interactions/           # button + autocomplete handlers
 ├── i18n/{translator, custom-lang.yaml}
 ├── utils/                  # logger, permissions, discord-errors, time, safe-reply, result, discord-members
@@ -155,6 +168,7 @@ interface AppContext {
         guildConfig: GuildConfigRepository;
         roleRewards: RoleRewardsRepository;
         joinHistory: JoinHistoryRepository;
+        bonusInvites: BonusInvitesRepository;
     };
 }
 ```
@@ -172,6 +186,7 @@ Tables:
 - **`GuildConfig`** — per-guild overrides; NULL columns fall back to env.
 - **`RoleRewards`** — `(guildId, threshold, roleId)` with UNIQUE constraint.
 - **`JoinHistory`** — full audit trail with `flaggedAsRejoin` boolean.
+- **`BonusInvites`** — admin-granted net bonus per `(guildId, userId)`; may go negative.
 
 All `DEFAULT` clauses and write paths use `strftime('%Y-%m-%dT%H:%M:%fZ', 'now')` so timestamps match `Date.toISOString()` byte-for-byte — lexicographic comparison is guaranteed correct.
 
